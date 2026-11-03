@@ -1,0 +1,12 @@
+{
+  "name": "artrok",
+  "version": "1.0.0",
+  "description": "Jogo ArtROK",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
