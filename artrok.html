@@ -323,6 +323,7 @@
                 <button id="tab-public" onclick="switchChatTab('public')" class="flex-1 py-2 text-xs font-bold text-zinc-400 hover:text-white flex items-center justify-center space-x-1 transition-all">
                     <i data-lucide="message-square" class="w-3.5 h-3.5"></i>
                     <span>Bate-Papo</span>
+                    <span id="chat-badge" class="hidden min-w-[16px] h-4 px-1 rounded-full bg-red-600 text-white text-[9px] font-black leading-4 text-center"></span>
                 </button>
             </div>
 
@@ -1160,8 +1161,15 @@
         }
 
         let activeChatTab = 'guess';
+        let chatUnread = 0;
+        function renderChatBadge() {
+            const b = document.getElementById('chat-badge'); if (!b) return;
+            b.textContent = chatUnread > 9 ? '+9' : String(chatUnread);
+            b.classList.toggle('hidden', chatUnread <= 0);
+        }
         function switchChatTab(tab) {
             activeChatTab = tab;
+            if (tab === 'public') { chatUnread = 0; renderChatBadge(); }
             const guessBtn = document.getElementById('tab-guess');
             const publicBtn = document.getElementById('tab-public');
             const guessBox = document.getElementById('chat-messages-guess');
@@ -1230,8 +1238,11 @@
             }
         }
 
-        function addChatMessage(type, msg) {
-            const containerId = (type === 'public') ? 'chat-messages-public' : 'chat-messages-guess';
+        const PUBLIC_NOTICE_RE = /denunci|reportou|reported|reportó|bani|ban\b|banned|vot(o|ou|aram|ed|ó)\b|votes?\b|votos\b/i;
+        function addChatMessage(type, msg, scope, silent) {
+            const toPublic = type === 'public' || scope === 'public' || (type === 'system' && PUBLIC_NOTICE_RE.test(String(msg)));
+            if (toPublic && !silent && activeChatTab !== 'public') { chatUnread++; renderChatBadge(); }
+            const containerId = toPublic ? 'chat-messages-public' : 'chat-messages-guess';
             const container = document.getElementById(containerId);
             if (!container) return;
             const el = document.createElement('div');
@@ -1463,6 +1474,7 @@
             document.getElementById('room-theme-badge').textContent = activeRoom.theme.name[currentLang];
             document.getElementById('chat-messages-guess').innerHTML = '';
             document.getElementById('chat-messages-public').innerHTML = '';
+            chatUnread = 0; renderChatBadge();
             hist = []; hidx = -1; initCanvas(); lucide.createIcons();
         }
         function refreshRoomUI() {
@@ -1520,8 +1532,8 @@
                 case 'JOINED': case 'ROOM': applyRoom(m.room); break;
                 case 'WORD': myWord = m.word; refreshRoomUI(); break;
                 case 'TICK': document.getElementById('game-timer').textContent = `${m.t}s`; if (m.t > 0 && m.t <= 5) SFX.tick(); break;
-                case 'CHAT': addChatMessage(m.channel, m.text); if (m.channel === 'system' && (m.ok || m.text.includes('acertou'))) SFX.correct(); break;
-                case 'CHAT_HISTORY': m.items.forEach(t => addChatMessage('public', t)); break;
+                case 'CHAT': addChatMessage(m.channel, m.text, m.scope); if (m.channel === 'system' && (m.ok || m.text.includes('acertou'))) SFX.correct(); break;
+                case 'CHAT_HISTORY': m.items.forEach(t => addChatMessage('public', t, null, true)); break;
                 case 'BANNED': if (activeRoom) SFX.ban(); else SFX.blocked(); showBanned(m); break;
                 case 'ERROR': showAlertBanner(m.msg); break;
                 case 'ROUND_END': showRoundEnd(m.title, m.word); if (m.kind === 'skip') SFX.skip(); else if (m.kind === 'report') SFX.report(); else SFX.roundEnd(); break;
@@ -1870,9 +1882,16 @@
                 showAlertBanner('Não foi possível entrar com o Google. Tente de novo.');
             }
         }
+        function restoreGuestProfile() {
+            currentUser.name = ''; currentUser.bio = ''; currentUser.avatar = presetAvatarsList[4];
+            try { applyProfile(JSON.parse(ls('artrok_profile') || 'null')); } catch (e) {}
+            const nu = document.getElementById('nav-username'); if (nu) nu.textContent = navNameText();
+            updateAvatarImages();
+        }
         function googleLogout() {
             try { if (googleToken && window.google && google.accounts && google.accounts.oauth2) google.accounts.oauth2.revoke(googleToken, () => {}); } catch (e) {}
             googleToken = null; googleUser = null; isGoogleLoggedIn = false;
+            restoreGuestProfile();
             setGoogleButton(); sendWS({ type: 'GOOGLE_LOGOUT' }); sendProfile();
             switchLobbyTab('public');
         }
@@ -1957,8 +1976,45 @@
             clearTimeout(createTimer);
             createTimer = setTimeout(() => showAlertBanner('O servidor não respondeu ao criar a sala. Tente novamente.'), 5000);
         }
+        // ---- Uma sessão por navegador: outra aba do mesmo navegador não entra em sala ----
+        // (janela anônima tem armazenamento separado, então continua podendo jogar com outra conta)
+        const TAB_ID = 't' + Math.random().toString(36).slice(2);
+        const LOCK_KEY = 'artrok_lock';
+        let joinPendingUntil = 0;
+        function readLock() { try { const l = JSON.parse(localStorage.getItem(LOCK_KEY) || 'null'); return l && Date.now() - l.ts < 5000 ? l : null; } catch (e) { return null; } }
+        function claimLock() { try { localStorage.setItem(LOCK_KEY, JSON.stringify({ tab: TAB_ID, ts: Date.now() })); } catch (e) {} }
+        function releaseLock() { try { const l = JSON.parse(localStorage.getItem(LOCK_KEY) || 'null'); if (l && l.tab === TAB_ID) localStorage.removeItem(LOCK_KEY); } catch (e) {} }
+        function otherTabPlaying() { const l = readLock(); return !!(l && l.tab !== TAB_ID); }
+        setInterval(() => {
+            if (activeRoom) claimLock();
+            else { const l = readLock(); if (l && l.tab === TAB_ID && Date.now() > joinPendingUntil) releaseLock(); }
+        }, 2000);
+        window.addEventListener('pagehide', releaseLock);
+        window.addEventListener('beforeunload', releaseLock);
+        function showPlayingElsewhere() {
+            if (document.getElementById('playing-elsewhere')) return;
+            try { SFX.blocked(); } catch (e) {}
+            const el = document.createElement('div');
+            el.id = 'playing-elsewhere';
+            el.className = 'fixed inset-0 z-[70] bg-black/90 flex flex-col items-center justify-center p-6 text-center space-y-3';
+            el.innerHTML = '<div class="text-5xl">🔒</div><h2 class="text-xl font-black text-brand-yellow"></h2><button class="mt-2 px-6 py-2.5 bg-brand-yellow text-black font-extrabold rounded-xl text-xs uppercase">OK</button>';
+            el.querySelector('h2').textContent = tr('Você já está jogando em outra aba ou dispositivo.');
+            el.querySelector('button').onclick = () => el.remove();
+            document.body.appendChild(el);
+        }
+        const _sendWSBase = sendWS;
+        sendWS = function (o) {
+            if (o && ['JOIN', 'JOIN_CODE', 'CREATE_PRIVATE', 'CREATE_CUSTOM'].includes(o.type)) {
+                if (otherTabPlaying()) { showPlayingElsewhere(); return false; }
+                claimLock(); joinPendingUntil = Date.now() + 6000;
+            }
+            return _sendWSBase(o);
+        };
+
         const _onServerBase = onServer;
         onServer = function (m) {
+            if (m && m.type === 'ERROR' && (m.code === 'ALREADY_PLAYING' || m.code === 'ACCOUNT_BUSY')) { clearTimeout(joinTimer); joinPendingUntil = 0; showPlayingElsewhere(); return; }
+            if (m && ['ERROR', 'BANNED'].includes(m.type) && !activeRoom) joinPendingUntil = 0;
             if (m && ['LOBBY', 'JOINED', 'ROOM', 'ERROR'].includes(m.type)) clearTimeout(createTimer);
             if (m && ['JOINED', 'ROOM', 'ERROR', 'BANNED'].includes(m.type)) clearTimeout(joinTimer);
             if (m && m.type === 'CUSTOM_DATA' && customEditId === m.roomId && Array.isArray(m.words)) { customWords = m.words.map(cleanWord).filter(Boolean); renderCustomWords(); }
@@ -2150,7 +2206,7 @@
         function lsSave(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
         function persistProfile() {
             const snapObj = profileSnapshot();
-            const keys = ['artrok_profile'].concat(googleUser ? ['artrok_gprof_' + googleUser.sub] : []);
+            const keys = googleUser ? ['artrok_gprof_' + googleUser.sub] : ['artrok_profile']; // logado = perfil da conta; deslogado = perfil de visitante
             keys.forEach(k => {
                 if (!lsSave(k, JSON.stringify(snapObj))) lsSave(k, JSON.stringify({ name: snapObj.name, bio: snapObj.bio, av: snapObj.img ? 4 : snapObj.av, img: null }));
             });
