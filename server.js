@@ -8,7 +8,7 @@ const DATA = path.join(__dirname, 'data'); fs.mkdirSync(DATA, { recursive: true 
 let CONFIG = {}; try { CONFIG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')); } catch (e) {}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || CONFIG.googleClientId || '';
 
-const ROUND_SECONDS = 80, BETWEEN_MS = 4500, MAX_PLAYERS = 10, BAN_MS = 10 * 60 * 1000;
+const ROUND_SECONDS = 80, BETWEEN_MS = 4500, MAX_PLAYERS = 10, BAN_MS = 60 * 60 * 1000;   // ban dura 1 hora
 const MAX_FRAME = 12 * 1024 * 1024, MAX_IMG = 7200000;
 const LANGS = ['pt', 'en', 'es'];
 
@@ -29,8 +29,15 @@ const MSG = {
   guessed: { pt: '{n} acertou a palavra! (+{p} pts)', en: '{n} guessed the word! (+{p} pts)', es: '¡{n} adivinó la palabra! (+{p} pts)' },
   joined: { pt: '{n} entrou na sala.', en: '{n} joined the room.', es: '{n} entró a la sala.' },
   left: { pt: '{n} saiu da sala.', en: '{n} left the room.', es: '{n} salió de la sala.' },
-  banned: { pt: '{n} foi banido da sala.', en: '{n} was banned from the room.', es: '{n} fue baneado de la sala.' },
-  banReason: { pt: 'Você foi banido por votação dos jogadores.', en: 'You were banned by player vote.', es: 'Fuiste baneado por votación de los jugadores.' },
+  banned: { pt: '{n} foi banido da sala por 1 hora.', en: '{n} was banned from the room for 1 hour.', es: '{n} fue baneado de la sala por 1 hora.' },
+  banReason: { pt: 'Você foi banido por votação dos jogadores por 1 hora.', en: 'You were banned by player vote for 1 hour.', es: 'Fuiste baneado por votación de los jugadores por 1 hora.' },
+  banSpam: { pt: 'Você foi banido por spam no chat por 1 hora.', en: 'You were banned for chat spam for 1 hour.', es: 'Fuiste baneado por spam en el chat por 1 hora.' },
+  banAuto: { pt: 'Você foi banido por autodraw (desenho automático) por 1 hora.', en: 'You were banned for autodraw (automatic drawing) for 1 hour.', es: 'Fuiste baneado por autodraw (dibujo automático) por 1 hora.' },
+  bannedSpam: { pt: '{n} foi banido por spam por 1 hora.', en: '{n} was banned for spam for 1 hour.', es: '{n} fue baneado por spam por 1 hora.' },
+  bannedAuto: { pt: '{n} foi banido por autodraw por 1 hora.', en: '{n} was banned for autodraw for 1 hour.', es: '{n} fue baneado por autodraw por 1 hora.' },
+  banVote: { pt: '{n} votou para banir {t} ({c}/{r}).', en: '{n} voted to ban {t} ({c}/{r}).', es: '{n} votó para banear a {t} ({c}/{r}).' },
+  reportVote: { pt: '{n} denunciou o desenho de {d} ({c}/{r}).', en: '{n} reported {d}\'s drawing ({c}/{r}).', es: '{n} denunció el dibujo de {d} ({c}/{r}).' },
+  reportDrop: { pt: 'O desenho de {d} foi derrubado por denúncia. Passando a vez!', en: '{d}\'s drawing was taken down by reports. Next turn!', es: 'El dibujo de {d} cayó por denuncias. ¡Siguiente turno!' },
   anon: { pt: 'Anônimo', en: 'Anonymous', es: 'Anónimo' },
 };
 const tx = (lang, key, v) => ((MSG[key][lang] || MSG[key].pt)).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] !== undefined ? v[k] : ''));
@@ -110,7 +117,9 @@ setInterval(() => { for (const p of conns) { if (p.socket.writable) wsSend(p.soc
 // ---------------------------------------------------------------- dados
 const conns = new Set(), byId = new Map();
 const rooms = new Map();           // id -> room
-const bans = new Map();            // chave -> até quando
+const bans = new Map(Object.entries(loadJSON('bans.json', {})).filter(([, u]) => u > Date.now()));   // chave -> até quando (salvo em disco; expira sozinho)
+const saveBans = () => saveJSON('bans.json', Object.fromEntries(bans));
+setInterval(() => { const now = Date.now(); let ch = false; for (const [k, u] of bans) if (u <= now) { bans.delete(k); ch = true; } if (ch) saveBans(); }, 60 * 1000);
 const accounts = loadJSON('accounts.json', {});
 const savedCustom = loadJSON('rooms.json', []);
 
@@ -155,12 +164,31 @@ function view(room, to) {
 }
 const toRoom = (room, fn) => { for (const pl of room.players.values()) fn(pl); };
 // avisa quem está desenhando no modo livre quantas pessoas estão assistindo
+// banimento automático (spam / autodraw): 1 hora, mesmo esquema do ban por votação
+function autoBan(room, t, kind) {
+  const until = Date.now() + BAN_MS; bans.set(room.id + '|' + t.id, until); if (t.device) bans.set(room.id + '|' + t.device, until); saveBans();
+  const nm = t.shownName; room.votes.delete(t.id);
+  t.send({ type: 'BANNED', room: room.kind === 'public' ? room.themeId : room.name, reason: tx(t.lang, kind === 'spam' ? 'banSpam' : 'banAuto'), until });
+  leaveRoom(t, true); sysPub(room, kind === 'spam' ? 'bannedSpam' : 'bannedAuto', { n: nm });
+}
+// mais de 10 mensagens em 5 s = spam
+function spamCheck(room, p) {
+  const now = Date.now(); p.spamTs = (p.spamTs || []).filter(t => now - t < 5000); p.spamTs.push(now);
+  if (p.spamTs.length > 10) { p.spamTs = []; autoBan(room, p, 'spam'); return true; } return false;
+}
+// 50 traços/cliques em 10 s = autodraw (cada traço termina com um SNAPSHOT / FREE_SNAP)
+function strokeCheck(room, p) {
+  const now = Date.now(); p.strokeTs = (p.strokeTs || []).filter(t => now - t < 10000); p.strokeTs.push(now);
+  if (p.strokeTs.length >= 50) { p.strokeTs = []; autoBan(room, p, 'auto'); return true; } return false;
+}
+const needVotes = room => Math.floor(room.players.size / 2) + 1;   // 2 jogadores=2, 3=2, 4=3, 6=4 ...
 function notifyWatchers(room, id) {
   const t = room && room.players.get(id); if (!t) return;
   let n = 0; for (const o of room.players.values()) if (o.freeWatch === id) n++;
   t.send({ type: 'FREE_WATCHERS', count: n });
 }
 const broadcastRoom = room => toRoom(room, pl => pl.send({ type: 'ROOM', room: view(room, pl) }));
+const sysPub = (room, key, v) => toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'system', scope: 'public', text: tx(pl.lang, key, v) }));
 const sys = (room, key, v) => toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'system', text: tx(pl.lang, key, v), ok: key === 'guessed' }));
 
 let lobbyTimer = null;
@@ -275,6 +303,7 @@ function gameOver(room) {
 }
 
 function handleChat(p, room, m) {
+  if (spamCheck(room, p)) return;
   const text = clean(m.text, 120); if (!text) return;
   const now = Date.now(); p.chatTimes = p.chatTimes.filter(t => now - t < 4000); if (p.chatTimes.length >= 6) return; p.chatTimes.push(now);
   if (m.channel === 'public') {
@@ -383,19 +412,25 @@ function onMessage(p, m) {
     case 'SKIP': if (room && room.phase === 'drawing' && room.drawerId === p.id) endRound(room, 'skipped'); break;
     case 'REPORT': {
       if (!room || room.phase !== 'drawing' || room.drawerId === p.id) break;
+      if (room.reports.has(p.id)) break;
       room.reports.add(p.id);
-      if (room.reports.size >= Math.max(1, Math.ceil((room.players.size - 1) / 2))) endRound(room, 'reported');
+      const dr = room.players.get(room.drawerId); if (!dr) break;
+      const valid = [...room.reports].filter(id => room.players.has(id) && id !== dr.id).length, need = needVotes(room);
+      sysPub(room, 'reportVote', { n: p.shownName, d: dr.shownName, c: valid, r: need });
+      if (valid >= need) { sysPub(room, 'reportDrop', { d: dr.shownName }); endRound(room, 'reported'); }
       break;
     }
     case 'VOTE_BAN': {
       if (!room) break; const t = room.players.get(String(m.targetId)); if (!t || t === p) break;
-      const v = room.votes.get(t.id) || new Set(); v.add(p.id); room.votes.set(t.id, v);
-      const eligible = room.players.size - 1;
-      if (v.size >= 2 && v.size > eligible / 2) {
-        const until = Date.now() + BAN_MS; bans.set(room.id + '|' + t.id, until); if (t.device) bans.set(room.id + '|' + t.device, until);
+      const v = room.votes.get(t.id) || new Set(); if (v.has(p.id)) break;
+      v.add(p.id); room.votes.set(t.id, v);
+      const valid = [...v].filter(id => room.players.has(id) && id !== t.id).length, need = needVotes(room);
+      sysPub(room, 'banVote', { n: p.shownName, t: t.shownName, c: valid, r: need });
+      if (valid >= need) {
+        const until = Date.now() + BAN_MS; bans.set(room.id + '|' + t.id, until); if (t.device) bans.set(room.id + '|' + t.device, until); saveBans();
         const nm = t.shownName; room.votes.delete(t.id);
         t.send({ type: 'BANNED', room: room.kind === 'public' ? room.themeId : room.name, reason: tx(t.lang, 'banReason'), until });
-        leaveRoom(t, true); sys(room, 'banned', { n: nm });
+        leaveRoom(t, true); sysPub(room, 'banned', { n: nm });
       }
       break;
     }
@@ -406,6 +441,7 @@ function onMessage(p, m) {
       toRoom(room, pl => { if (pl !== p) pl.send(out); }); break;
     }
     case 'SNAPSHOT': {
+      if (room && strokeCheck(room, p)) break;
       if (!room || room.phase !== 'drawing' || room.drawerId !== p.id || typeof m.data !== 'string' || m.data.length > 4e6) break;
       room.snapshot = m.data; toRoom(room, pl => { if (pl !== p) pl.send({ type: 'SNAPSHOT', data: m.data }); }); break;
     }
@@ -421,6 +457,7 @@ function onMessage(p, m) {
       break;
     }
     case 'FREE_DRAW': case 'FREE_CLEAR': case 'FREE_SNAP': {
+      if (m.type === 'FREE_SNAP' && room && strokeCheck(room, p)) break;
       if (!room || !p.free) break;
       if (m.type === 'FREE_SNAP') { if (typeof m.data !== 'string' || m.data.length > 4e6) break; p.freeSnap = m.data; }
       if (m.type === 'FREE_CLEAR') p.freeSnap = null;
