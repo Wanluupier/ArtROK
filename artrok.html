@@ -355,6 +355,8 @@
             <div id="free-board" class="relative bg-white rounded-xl overflow-hidden shadow-2xl border-2 border-brand-border">
                 <canvas id="free-paint-canvas" width="700" height="450" class="block w-full h-full cursor-crosshair bg-white"></canvas>
                 <div id="free-live-badge" class="hidden absolute top-2 left-2 bg-black/80 text-white px-2.5 py-1 rounded border border-zinc-700 text-[11px] font-semibold"></div>
+                <button id="free-watchers" type="button" class="hidden absolute top-2 right-2 z-10 bg-black/80 text-brand-yellow px-2.5 py-1 rounded border border-brand-yellow/50 text-[11px] font-bold"></button>
+                <div id="free-watchers-list" class="hidden absolute top-10 right-2 z-10 bg-black/90 text-white px-3 py-2 rounded border border-zinc-700 text-[11px] space-y-1 max-w-[70%]"></div>
             </div>
         </div>
         <div id="free-toolbar" class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 bg-brand-card p-2 rounded-xl border border-brand-border shadow-md"></div>
@@ -2353,8 +2355,8 @@
             const d = freeCtx.getImageData(0, 0, freeCanvas.width, freeCanvas.height);
             freeHist = freeHist.slice(0, freeHi + 1); freeHist.push(d); if (freeHist.length > 40) freeHist.shift(); freeHi = freeHist.length - 1;
         }
-        function freeSnap() { sendWS({ type: 'FREE_SNAP', data: freeCanvas.toDataURL('image/png') }); }
-        function freeGoto(i) { if (freeWatch || i < 0 || i >= freeHist.length) return; freeHi = i; freeCtx.putImageData(freeHist[i], 0, 0); freeSnap(); }
+        function freeSnap() { if (freeViewOnly) return; sendWS({ type: 'FREE_SNAP', data: freeCanvas.toDataURL('image/png') }); }
+        function freeGoto(i) { if (freeWatch || freeViewOnly || i < 0 || i >= freeHist.length) return; freeHi = i; freeCtx.putImageData(freeHist[i], 0, 0); freeSnap(); }
         function freeFill(x, y, hex) {
             const W = freeCanvas.width, H = freeCanvas.height, img = freeCtx.getImageData(0, 0, W, H), d = img.data;
             x = Math.floor(x); y = Math.floor(y); if (x < 0 || y < 0 || x >= W || y >= H) return;
@@ -2425,7 +2427,7 @@
                 freeLine(a, b, col, w); sendWS({ type: 'FREE_DRAW', x0: a.x, y0: a.y, x1: b.x, y1: b.y, color: col, w });
             };
             const down = e => {
-                if (freeWatch) return; e.preventDefault(); const p = pos(e);
+                if (freeWatch || freeViewOnly) return; e.preventDefault(); const p = pos(e);
                 if (freeTool === 'bucket') { freeFill(p.x, p.y, freeCurrentColor); freeSave(); freeSnap(); return; }
                 if (FREE_SHAPES.includes(freeTool)) { freeStart = p; freeBase = freeCtx.getImageData(0, 0, freeCanvas.width, freeCanvas.height); return; }
                 freeDown = true; freeLast = p; seg(p, p);
@@ -2455,7 +2457,7 @@
             }
             window._freeUp = up;
         };
-        clearFreeCanvas = function () { if (freeWatch) return; freeCtxClear(); freeSave(); sendWS({ type: 'FREE_CLEAR' }); };
+        clearFreeCanvas = function () { if (freeWatch || freeViewOnly) return; freeCtxClear(); freeSave(); sendWS({ type: 'FREE_CLEAR' }); };
         watchFree = function (id) {
             freeWatch = id; freeCtxClear();
             if (!id && freeHi >= 0) freeCtx.putImageData(freeHist[freeHi], 0, 0); // volta ao meu desenho
@@ -2475,13 +2477,46 @@
                 b.className = 'px-3 py-1.5 rounded-lg font-bold border ' + (on ? 'bg-brand-yellow text-black border-brand-yellow' : 'bg-zinc-900 text-zinc-300 border-brand-border');
                 b.onclick = () => watchFree(on ? null : p.id); box.appendChild(b);
             });
-            box.classList.toggle('hidden', !others.length);
+            if (!others.length && freeViewOnly) { const sp = document.createElement('span'); sp.className = 'text-zinc-400'; sp.textContent = tr('Ninguém mais está desenhando no modo livre agora.'); box.appendChild(sp); }
+            box.classList.toggle('hidden', !others.length && !freeViewOnly);
+            updateWatchersUI();
             const watching = freeWatch && activeRoom.players.find(q => q.id === freeWatch);
             const live = document.getElementById('free-live-badge');
             if (live) { live.classList.toggle('hidden', !watching); if (watching) live.textContent = trf('👁 Acompanhando {n} ao vivo', { n: watching.name || tr('Anônimo') }); }
-            const tb = document.getElementById('free-toolbar'); if (tb) tb.style.visibility = freeWatch ? 'hidden' : 'visible';
+            const tb = document.getElementById('free-toolbar'); if (tb) tb.style.visibility = (freeWatch || freeViewOnly) ? 'hidden' : 'visible';
             const fc = document.getElementById('free-paint-canvas'); if (fc) fc.style.cursor = freeWatch ? 'default' : 'crosshair';
             requestAnimationFrame(fitFreeBoard);
+        };
+
+        // ===== Modo livre durante a sua vez de desenhar (só assistir) + aviso de quem está assistindo =====
+        let freeViewOnly = false, freeWatchers = [];
+        function updateWatchersUI() {
+            const b = document.getElementById('free-watchers'), l = document.getElementById('free-watchers-list'); if (!b || !l) return;
+            const n = freeWatchers.length, show = n > 0 && freeOpen && !freeWatch && !freeViewOnly;
+            b.classList.toggle('hidden', !show); if (!show) l.classList.add('hidden');
+            b.textContent = '👁 ' + n; l.innerHTML = '';
+            freeWatchers.forEach(nm => { const d = document.createElement('div'); d.textContent = nm; l.appendChild(d); });
+            b.onclick = () => l.classList.toggle('hidden');
+        }
+        toggleFreeModeInRoom = function () {
+            const modal = document.getElementById('free-mode-modal');
+            if (!freeOpen) {
+                if (!activeRoom) return;
+                freeViewOnly = !!canDraw(); // na sua vez: só assiste, sem sair do jogo
+                freeOpen = true; freeWatch = null; modal.classList.remove('hidden'); initFreeCanvas();
+                if (!freeViewOnly) sendWS({ type: 'FREE_ON' });
+                else { const o = activeRoom.players.filter(p => p.free && p.id !== currentUser.id); if (o.length) watchFree(o[0].id); }
+            } else {
+                freeOpen = false; exitFsFor(modal); modal.classList.add('hidden');
+                if (!freeViewOnly) sendWS({ type: 'FREE_OFF' }); else if (freeWatch) sendWS({ type: 'FREE_WATCH', targetId: '' });
+                freeViewOnly = false; freeWatchers = []; updateWatchersUI();
+            }
+        };
+        const _onServerFree = onServer;
+        onServer = function (m) {
+            if (m && m.type === 'FREE_BLOCKED' && freeViewOnly) return;
+            if (m && m.type === 'FREE_WATCHERS') { freeWatchers = (Array.isArray(m.names) ? m.names : []).map(x => String(x || '').slice(0, 20)).slice(0, 30); updateWatchersUI(); return; }
+            _onServerFree(m);
         };
 
         restoreGoogleSession();
