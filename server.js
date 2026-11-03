@@ -166,7 +166,7 @@ const toRoom = (room, fn) => { for (const pl of room.players.values()) fn(pl); }
 // avisa quem está desenhando no modo livre quantas pessoas estão assistindo
 // banimento automático (spam / autodraw): 1 hora, mesmo esquema do ban por votação
 function autoBan(room, t, kind) {
-  const until = Date.now() + BAN_MS; bans.set(room.id + '|' + t.id, until); if (t.device) bans.set(room.id + '|' + t.device, until); saveBans();
+  const until = Date.now() + BAN_MS; bans.set('*|' + t.id, until); if (t.device) bans.set('*|' + t.device, until); saveBans();   // ban GLOBAL (vale em todas as salas)
   const nm = t.shownName; room.votes.delete(t.id);
   t.send({ type: 'BANNED', room: room.kind === 'public' ? room.themeId : room.name, reason: tx(t.lang, kind === 'spam' ? 'banSpam' : 'banAuto'), until });
   leaveRoom(t, true); sysPub(room, kind === 'spam' ? 'bannedSpam' : 'bannedAuto', { n: nm });
@@ -201,7 +201,7 @@ function sendLobby(p) { p.send({ type: 'LOBBY', rooms: lobbyFor(p) }); }
 function lobbyAll() { clearTimeout(lobbyTimer); lobbyTimer = setTimeout(() => { for (const p of conns) if (p.id) sendLobby(p); }, 150); }
 
 function roomKey(room) { return room.kind === 'public' ? room.id : room.id; }
-function isBanned(p, room) { const now = Date.now(); for (const k of [p.id, p.device]) { if (!k) continue; const u = bans.get(room.id + '|' + k); if (u && u > now) return u; } return 0; }
+function isBanned(p, room) { const now = Date.now(); for (const k of [p.id, p.device]) { if (!k) continue; for (const pre of [room.id, '*']) { const u = bans.get(pre + '|' + k); if (u && u > now) return u; } } return 0; }
 
 function leaveRoom(p, silent) {
   const room = p.roomId && rooms.get(p.roomId); if (!room) { p.roomId = null; return; }
