@@ -1358,13 +1358,18 @@
             try { let d = localStorage.getItem('artrok_dev'); if (!d) { d = 'd' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('artrok_dev', d); } return d; } catch (e) { return ''; }
         }
         function sendProfile() {
+            if (typeof googleUser !== 'undefined' && googleUser && typeof accountSynced !== 'undefined' && !accountSynced) return; // espera o perfil da conta chegar do servidor
             sendWS({ type: 'PROFILE', id: currentUser.id, device: deviceToken(), name: (currentUser.name || '').slice(0, 15), av: Math.max(0, presetAvatarsList.indexOf(currentUser.avatar)), bio: (currentUser.bio || '').slice(0, 50), lang: currentLang, hasImg: presetAvatarsList.indexOf(currentUser.avatar) < 0, img: (presetAvatarsList.indexOf(currentUser.avatar) < 0 && imgSentOnConn !== currentUser.avatar) ? currentUser.avatar : undefined, gid: googleUser ? googleUser.sub : undefined, gtoken: googleToken || undefined });
             if (wsReady && presetAvatarsList.indexOf(currentUser.avatar) < 0) imgSentOnConn = currentUser.avatar;
         }
         function connectServer() {
             if (location.protocol === 'file:' && !SERVER_URL) { showAlertBanner('Abra o jogo pelo endereço do servidor (não pelo arquivo).'); return; }
             ws = new WebSocket(SERVER_URL || ((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host));
-            ws.onopen = () => { wsReady = true; imgSentOnConn = null; sendProfile(); };
+            ws.onopen = () => {
+                wsReady = true; imgSentOnConn = null;
+                if (googleUser && googleTokenValid()) { beginAccountSync(); sendWS({ type: 'GOOGLE_LOGIN', token: googleToken, gid: googleUser.sub, email: googleUser.email, name: googleUser.name }); }
+                sendProfile();
+            };
             ws.onmessage = e => { try { onServer(JSON.parse(e.data)); } catch (err) { console.error(err); } };
             ws.onclose = () => {
                 wsReady = false;
@@ -1842,12 +1847,14 @@
         // Em "Origens JavaScript autorizadas" coloque o endereço do seu site.
         const GOOGLE_CLIENT_ID = (window.ARTROK_CONFIG && window.ARTROK_CONFIG.googleClientId) || ''; // configure no config.json do servidor
         let googleToken = null, googleUser = null, googleTokenClient = null;
+        let googleTokenExp = 0, googleNeedsReconnect = false, googleRefreshing = false, lastRefreshTry = 0, accountSynced = true, acctTimer = null, tokenWaiters = [];
 
         function setGoogleButton() {
             const t = document.getElementById('google-status-text');
             if (t) t.textContent = isGoogleLoggedIn && googleUser ? (googleUser.name || 'Conectado').split(' ')[0] : 'Google';
         }
         function toggleGoogleLogin() {
+            if (isGoogleLoggedIn && googleNeedsReconnect && !googleTokenValid()) { googleNeedsReconnect = false; if (refreshGoogleToken(null, true)) return; }
             if (isGoogleLoggedIn) { googleLogout(); return; }
             if (!GOOGLE_CLIENT_ID) { showAlertBanner('Login Google: falta colocar o GOOGLE_CLIENT_ID no código do site.'); return; }
             if (!window.google || !google.accounts || !google.accounts.oauth2) { showAlertBanner('Não foi possível carregar o login do Google. Tente de novo.'); return; }
@@ -1869,14 +1876,17 @@
                 googleToken = resp.access_token;
                 googleUser = { sub: u.sub, name: u.name || '', email: u.email || '' };
                 isGoogleLoggedIn = true;
+                googleTokenExp = Date.now() + Math.max(60, (resp.expires_in || 3600) - 120) * 1000;
+                googleNeedsReconnect = false;
+                saveGoogleSession();
                 try { const saved = JSON.parse(ls('artrok_gprof_' + googleUser.sub) || 'null'); if (saved) applyProfile(saved); } catch (e) {}
                 if (!currentUser.name && googleUser.name) {
                     currentUser.name = googleUser.name.slice(0, 15);
                     const nd = document.getElementById('nav-username'); if (nd) nd.textContent = currentUser.name;
                 }
                 persistProfile(); setGoogleButton();
+                beginAccountSync();
                 sendWS({ type: 'GOOGLE_LOGIN', token: googleToken, gid: googleUser.sub, email: googleUser.email, name: googleUser.name });
-                sendProfile();
                 showAlertBanner('Login com Google ativo! Salas personalizadas liberadas.');
             } catch (e) {
                 showAlertBanner('Não foi possível entrar com o Google. Tente de novo.');
@@ -1890,11 +1900,80 @@
         }
         function googleLogout() {
             try { if (googleToken && window.google && google.accounts && google.accounts.oauth2) google.accounts.oauth2.revoke(googleToken, () => {}); } catch (e) {}
-            googleToken = null; googleUser = null; isGoogleLoggedIn = false;
+            googleToken = null; googleUser = null; isGoogleLoggedIn = false; googleTokenExp = 0; googleNeedsReconnect = false; accountSynced = true;
+            try { localStorage.removeItem('artrok_gsess'); } catch (e) {}
             restoreGuestProfile();
             setGoogleButton(); sendWS({ type: 'GOOGLE_LOGOUT' }); sendProfile();
             switchLobbyTab('public');
         }
+
+        // ---- Sessão do Google persistente (não desloga ao atualizar a página) ----
+        function googleTokenValid() { return !!(googleToken && Date.now() < googleTokenExp); }
+        function saveGoogleSession() {
+            if (!googleUser) return;
+            try { localStorage.setItem('artrok_gsess', JSON.stringify({ sub: googleUser.sub, name: googleUser.name, email: googleUser.email, token: googleToken, exp: googleTokenExp })); } catch (e) {}
+        }
+        function beginAccountSync() {
+            accountSynced = false; clearTimeout(acctTimer);
+            acctTimer = setTimeout(() => { if (!accountSynced) { accountSynced = true; sendProfile(); } }, 3000);
+        }
+        function restoreGoogleSession() {
+            let sv = null; try { sv = JSON.parse(localStorage.getItem('artrok_gsess') || 'null'); } catch (e) {}
+            if (!sv || !sv.sub) return;
+            googleUser = { sub: sv.sub, name: sv.name || '', email: sv.email || '' };
+            isGoogleLoggedIn = true;
+            if (sv.token && sv.exp > Date.now()) { googleToken = sv.token; googleTokenExp = sv.exp; } else { googleToken = null; googleTokenExp = 0; }
+            currentUser.name = ''; currentUser.bio = ''; currentUser.avatar = presetAvatarsList[4];
+            try { const saved = JSON.parse(localStorage.getItem('artrok_gprof_' + googleUser.sub) || 'null'); if (saved) applyProfile(saved); } catch (e) {}
+            if (!currentUser.name && googleUser.name) currentUser.name = googleUser.name.slice(0, 15);
+            const nu = document.getElementById('nav-username'); if (nu) nu.textContent = navNameText();
+            updateAvatarImages(); setGoogleButton();
+            accountSynced = true;
+        }
+        function finishRefresh(ok) {
+            googleRefreshing = false;
+            const w = tokenWaiters.splice(0);
+            if (ok) { w.forEach(f => { try { f(); } catch (e) {} }); return; }
+            googleNeedsReconnect = true;
+            if (w.length) { clearTimeout(joinTimer); showAlertBanner('Sua sessão do Google expirou. Toque no botão Google para reconectar.'); }
+        }
+        async function onGoogleRefresh(resp) {
+            if (!resp || resp.error || !resp.access_token) { finishRefresh(false); return; }
+            try {
+                const r = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', { headers: { Authorization: 'Bearer ' + resp.access_token } });
+                const u = await r.json();
+                if (!u || !u.sub || (googleUser && u.sub !== googleUser.sub)) throw new Error('conta diferente');
+                googleToken = resp.access_token;
+                googleTokenExp = Date.now() + Math.max(60, (resp.expires_in || 3600) - 120) * 1000;
+                googleNeedsReconnect = false;
+                saveGoogleSession();
+                beginAccountSync();
+                sendWS({ type: 'GOOGLE_LOGIN', token: googleToken, gid: googleUser.sub, email: googleUser.email, name: googleUser.name });
+                finishRefresh(true);
+            } catch (e) { finishRefresh(false); }
+        }
+        function refreshGoogleToken(cb, interactive) {
+            if (!isGoogleLoggedIn || !googleUser) return false;
+            if (!GOOGLE_CLIENT_ID || !window.google || !google.accounts || !google.accounts.oauth2) return false;
+            if (cb) tokenWaiters.push(cb);
+            if (googleRefreshing) return true;
+            googleRefreshing = true; lastRefreshTry = Date.now();
+            try {
+                const c = google.accounts.oauth2.initTokenClient({
+                    client_id: GOOGLE_CLIENT_ID, scope: 'openid email profile', hint: googleUser.email || undefined,
+                    callback: onGoogleRefresh, error_callback: () => finishRefresh(false)
+                });
+                c.requestAccessToken({ prompt: interactive ? '' : 'none' });
+            } catch (e) { finishRefresh(false); }
+            return true;
+        }
+        // renova o token em segundo plano no primeiro toque/tecla quando ele venceu (fora de partida)
+        ['pointerdown', 'keydown'].forEach(ev => document.addEventListener(ev, () => {
+            if (!isGoogleLoggedIn || googleRefreshing || activeRoom) return;
+            if (googleToken && googleTokenExp - Date.now() > 5 * 60 * 1000) return;
+            if (Date.now() - lastRefreshTry < 60000) return;
+            refreshGoogleToken();
+        }, true));
 
         // ---- Salas personalizadas ----
         function themeFor(id, name) {
@@ -2006,6 +2085,10 @@
         sendWS = function (o) {
             if (o && ['JOIN', 'JOIN_CODE', 'CREATE_PRIVATE', 'CREATE_CUSTOM'].includes(o.type)) {
                 if (otherTabPlaying()) { showPlayingElsewhere(); return false; }
+                if (isGoogleLoggedIn && !googleTokenValid()) {
+                    if (refreshGoogleToken(() => sendWS(o))) return true;
+                    showAlertBanner('Sua sessão do Google expirou. Toque no botão Google para reconectar.'); return false;
+                }
                 claimLock(); joinPendingUntil = Date.now() + 6000;
             }
             return _sendWSBase(o);
@@ -2018,7 +2101,7 @@
             if (m && ['LOBBY', 'JOINED', 'ROOM', 'ERROR'].includes(m.type)) clearTimeout(createTimer);
             if (m && ['JOINED', 'ROOM', 'ERROR', 'BANNED'].includes(m.type)) clearTimeout(joinTimer);
             if (m && m.type === 'CUSTOM_DATA' && customEditId === m.roomId && Array.isArray(m.words)) { customWords = m.words.map(cleanWord).filter(Boolean); renderCustomWords(); }
-            if (m && m.type === 'ACCOUNT') { applyProfile(m.profile); persistProfile(); }
+            if (m && m.type === 'ACCOUNT') { applyProfile(m.profile, true); persistProfile(); if (!accountSynced) { accountSynced = true; clearTimeout(acctTimer); sendProfile(); } }
             _onServerBase(m);
         };
 
@@ -2194,12 +2277,16 @@
             const i = presetAvatarsList.indexOf(currentUser.avatar);
             return { name: currentUser.name, bio: currentUser.bio, av: i >= 0 ? i : null, img: i < 0 ? currentUser.avatar : null };
         }
-        function applyProfile(pr) {
+        function applyProfile(pr, fromServer) {
             if (!pr) return;
             if (typeof pr.name === 'string') currentUser.name = pr.name.slice(0, 15);
             if (typeof pr.bio === 'string') currentUser.bio = pr.bio.slice(0, 50);
-            if (Number.isInteger(pr.av) && presetAvatarsList[pr.av]) currentUser.avatar = presetAvatarsList[pr.av];
-            else if (safeImg(pr.img)) currentUser.avatar = pr.img;
+            const localCustom = presetAvatarsList.indexOf(currentUser.avatar) < 0;
+            if (safeImg(pr.img)) currentUser.avatar = pr.img; // foto/GIF salvo tem prioridade sobre o avatar padrão
+            else if (Number.isInteger(pr.av) && presetAvatarsList[pr.av]) {
+                // o cliente manda av:0 quando o avatar é foto/GIF; se o servidor não devolveu a imagem, mantém a foto local
+                if (!(fromServer && localCustom && pr.av === 0)) currentUser.avatar = presetAvatarsList[pr.av];
+            }
             const nu = document.getElementById('nav-username'); if (nu) nu.textContent = navNameText();
             updateAvatarImages();
         }
@@ -2254,6 +2341,7 @@
             setLanguage(ls('artrok_lang') || (nl === 'es' ? 'es' : nl === 'en' ? 'en' : 'pt'));
         })();
 
+        restoreGoogleSession();
         connectServer();
     </script>
 </body>
