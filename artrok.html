@@ -77,9 +77,8 @@
         .btn-leave:hover { background:#b91c1c !important; }
 
         /* modo livre: mesmo tamanho do painel normal; tela cheia só quando pedida */
-        #free-wrap { width:100%; max-width:640px; }
-        #free-board { width:100%; aspect-ratio:700/450; }
-        #free-mode-modal.is-fs #free-wrap { max-width:min(calc(100vw - 32px), calc((100vh - 210px) * 700 / 450)); }
+        #free-mode-modal { height:100dvh; }
+        #free-board { aspect-ratio:700/450; flex:none; }
 
         /* painel de desenho em tela cheia */
         #canvas-container-box.is-fs { background:#0A0A0A; padding:10px; }
@@ -112,9 +111,9 @@
             <button id="fs-btn" onclick="toggleFullscreenApp()" title="Tela cheia" class="flex items-center bg-zinc-900 hover:bg-zinc-800 border border-brand-border px-2.5 py-1.5 rounded-xl text-brand-yellow transition-all">
                 <i data-lucide="maximize" class="w-4 h-4"></i>
             </button>
-            <button id="google-login-btn" onclick="toggleGoogleLogin()" class="flex items-center space-x-1.5 bg-zinc-900 hover:bg-zinc-800 border border-brand-border px-2 sm:px-3 py-1.5 rounded-xl text-xs font-bold transition-all text-brand-yellow">
-                <i data-lucide="log-in" class="w-4 h-4"></i>
-                <span id="google-status-text" class="hidden sm:inline">Google</span>
+            <button id="google-login-btn" onclick="toggleGoogleLogin()" title="Google" aria-label="Google" class="flex items-center justify-center bg-[#050505] hover:bg-black border border-brand-border px-2.5 py-1.5 rounded-xl transition-all">
+                <span id="google-logo" class="flex items-center justify-center flex-shrink-0"><svg viewBox="0 0 24 24" class="w-5 h-5" fill="#3f3f46" stroke="#ffffff" stroke-width="1" stroke-linejoin="round" aria-hidden="true"><path d="M12.48 10.92v3.28h7.84c-.24 1.84-.853 3.187-1.787 4.133-1.147 1.147-2.933 2.4-6.053 2.4-4.827 0-8.6-3.893-8.6-8.72s3.773-8.72 8.6-8.72c2.6 0 4.507 1.027 5.907 2.347l2.307-2.307C18.747 1.44 16.133 0 12.48 0 5.867 0 .307 5.387.307 12s5.56 12 12.173 12c3.573 0 6.267-1.173 8.373-3.36 2.16-2.16 2.84-5.213 2.84-7.667 0-.76-.053-1.467-.173-2.053H12.48z"/></svg></span>
+                <span id="google-status-text" class="ml-1.5 text-xs font-bold text-white">Entrar</span>
             </button>
 
             <!-- SELETOR DE IDIOMA: PT / EN / ES -->
@@ -344,27 +343,21 @@
     </main>
 
     <!-- MODO LIVRE (DENTRO DA SALA) -->
-    <div id="free-mode-modal" class="hidden fixed inset-0 bg-black/95 z-50 flex flex-col p-3 sm:p-6 overflow-y-auto">
-        <div class="flex items-center justify-between gap-2 pb-3 border-b border-brand-border mb-3 flex-wrap">
+    <div id="free-mode-modal" class="hidden fixed inset-0 bg-[#0A0A0A] z-50 flex flex-col p-2.5 gap-2 overflow-hidden">
+        <div class="flex items-center justify-between gap-2 flex-wrap">
             <h2 class="text-base sm:text-lg font-black text-brand-yellow">Modo Livre</h2>
             <div class="flex items-center gap-2">
-                <button onclick="toggleFs(document.getElementById('free-mode-modal'))" title="Tela cheia" class="px-3 py-1.5 bg-zinc-800 text-brand-yellow font-bold rounded-lg border border-brand-border text-xs uppercase">⛶ Tela cheia</button>
                 <button onclick="toggleFreeModeInRoom()" class="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-lg border border-brand-border text-xs uppercase">Voltar ao jogo</button>
                 <button onclick="leaveRoom()" class="btn-leave px-3 py-1.5 font-bold rounded-lg text-xs uppercase">Sair da Sala</button>
             </div>
         </div>
-        <div class="flex-1 flex flex-col items-center justify-center">
-            <div id="free-wrap" class="space-y-3">
-                <div id="free-board" class="relative bg-white rounded-xl overflow-hidden shadow-2xl border-2 border-brand-border">
-                    <canvas id="free-paint-canvas" width="700" height="450" class="block w-full h-full cursor-crosshair bg-white"></canvas>
-                    <div id="free-live-badge" class="hidden absolute top-2 left-2 bg-black/80 text-white px-2.5 py-1 rounded border border-zinc-700 text-[11px] font-semibold"></div>
-                </div>
-                <div id="free-toolbar" class="flex flex-wrap items-center justify-between gap-2 bg-zinc-900 p-2.5 rounded-xl border border-brand-border">
-                    <div class="flex items-center space-x-1.5" id="free-palette"></div>
-                    <button onclick="clearFreeCanvas()" class="px-4 py-2 bg-red-600 text-white font-bold rounded-lg text-xs uppercase">Limpar Tela</button>
-                </div>
+        <div id="free-stage" class="flex-1 min-h-0 flex items-center justify-center">
+            <div id="free-board" class="relative bg-white rounded-xl overflow-hidden shadow-2xl border-2 border-brand-border">
+                <canvas id="free-paint-canvas" width="700" height="450" class="block w-full h-full cursor-crosshair bg-white"></canvas>
+                <div id="free-live-badge" class="hidden absolute top-2 left-2 bg-black/80 text-white px-2.5 py-1 rounded border border-zinc-700 text-[11px] font-semibold"></div>
             </div>
         </div>
+        <div id="free-toolbar" class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 bg-brand-card p-2 rounded-xl border border-brand-border shadow-md"></div>
     </div>
 
     <!-- MODAL DE PERFIL (EXATAMENTE 5 AVATARES P&B ESTILO MANGÁ DE ALTA QUALIDADE) -->
@@ -1851,7 +1844,9 @@
 
         function setGoogleButton() {
             const t = document.getElementById('google-status-text');
-            if (t) t.textContent = isGoogleLoggedIn && googleUser ? (googleUser.name || 'Conectado').split(' ')[0] : 'Google';
+            if (t) { const inn = !!(isGoogleLoggedIn && googleUser); t.textContent = inn ? '' : 'Entrar'; t.classList.toggle('hidden', inn); }
+            const lg = document.getElementById('google-logo');
+            if (lg) { const on = !!(isGoogleLoggedIn && googleUser), sv = lg.firstElementChild; sv.setAttribute('fill', on ? '#FFC800' : '#3f3f46'); sv.setAttribute('stroke', '#ffffff'); }
         }
         function toggleGoogleLogin() {
             if (isGoogleLoggedIn && googleNeedsReconnect && !googleTokenValid()) { googleNeedsReconnect = false; if (refreshGoogleToken(null, true)) return; }
@@ -2340,6 +2335,154 @@
             const nl = (navigator.language || 'pt').slice(0, 2).toLowerCase();
             setLanguage(ls('artrok_lang') || (nl === 'es' ? 'es' : nl === 'en' ? 'en' : 'pt'));
         })();
+
+        // ===== MODO LIVRE: painel grande (tela cheia padrão) + mesmas ferramentas do jogo normal =====
+        let freeTool = 'pencil', freeWidth = 6, freeHist = [], freeHi = -1, freeStart = null, freeBase = null;
+        const FREE_SHAPES = ['line', 'rect', 'circle', 'triangle'];
+        function fitFreeBoard() {
+            const st = document.getElementById('free-stage'), bd = document.getElementById('free-board');
+            if (!st || !bd) return;
+            const w = st.clientWidth, h = st.clientHeight; if (!w || !h) return;
+            const ar = 700 / 450; let cw = w, ch = w / ar;
+            if (ch > h) { ch = h; cw = h * ar; }
+            bd.style.width = Math.floor(cw) + 'px'; bd.style.height = Math.floor(ch) + 'px';
+        }
+        if (window.ResizeObserver) new ResizeObserver(fitFreeBoard).observe(document.getElementById('free-stage'));
+        window.addEventListener('resize', fitFreeBoard);
+        function freeSave() {
+            const d = freeCtx.getImageData(0, 0, freeCanvas.width, freeCanvas.height);
+            freeHist = freeHist.slice(0, freeHi + 1); freeHist.push(d); if (freeHist.length > 40) freeHist.shift(); freeHi = freeHist.length - 1;
+        }
+        function freeSnap() { sendWS({ type: 'FREE_SNAP', data: freeCanvas.toDataURL('image/png') }); }
+        function freeGoto(i) { if (freeWatch || i < 0 || i >= freeHist.length) return; freeHi = i; freeCtx.putImageData(freeHist[i], 0, 0); freeSnap(); }
+        function freeFill(x, y, hex) {
+            const W = freeCanvas.width, H = freeCanvas.height, img = freeCtx.getImageData(0, 0, W, H), d = img.data;
+            x = Math.floor(x); y = Math.floor(y); if (x < 0 || y < 0 || x >= W || y >= H) return;
+            const n = parseInt(hex.slice(1), 16), fr = (n >> 16) & 255, fg = (n >> 8) & 255, fb = n & 255;
+            const i0 = (y * W + x) * 4, tr_ = d[i0], tg = d[i0 + 1], tb = d[i0 + 2];
+            if (tr_ === fr && tg === fg && tb === fb) return;
+            const m = i => d[i] === tr_ && d[i + 1] === tg && d[i + 2] === tb;
+            const st = [[x, y]];
+            while (st.length) {
+                const [px, py] = st.pop(); let cy = py;
+                while (cy >= 0 && m((cy * W + px) * 4)) cy--; cy++;
+                let L = false, R = false;
+                while (cy < H && m((cy * W + px) * 4)) {
+                    const i = (cy * W + px) * 4; d[i] = fr; d[i + 1] = fg; d[i + 2] = fb; d[i + 3] = 255;
+                    if (px > 0) { if (m((cy * W + px - 1) * 4)) { if (!L) { st.push([px - 1, cy]); L = true; } } else L = false; }
+                    if (px < W - 1) { if (m((cy * W + px + 1) * 4)) { if (!R) { st.push([px + 1, cy]); R = true; } } else R = false; }
+                    cy++;
+                }
+            }
+            freeCtx.putImageData(img, 0, 0);
+        }
+        function freeShape(a, b) {
+            freeCtx.putImageData(freeBase, 0, 0); freeCtx.beginPath(); freeCtx.strokeStyle = freeCurrentColor; freeCtx.lineWidth = freeWidth; freeCtx.lineCap = freeCtx.lineJoin = 'round';
+            if (freeTool === 'line') { freeCtx.moveTo(a.x, a.y); freeCtx.lineTo(b.x, b.y); }
+            else if (freeTool === 'rect') freeCtx.rect(a.x, a.y, b.x - a.x, b.y - a.y);
+            else if (freeTool === 'circle') freeCtx.ellipse((a.x + b.x) / 2, (a.y + b.y) / 2, Math.abs(b.x - a.x) / 2, Math.abs(b.y - a.y) / 2, 0, 0, 7);
+            else { freeCtx.moveTo((a.x + b.x) / 2, a.y); freeCtx.lineTo(b.x, b.y); freeCtx.lineTo(a.x, b.y); freeCtx.closePath(); }
+            freeCtx.stroke();
+        }
+        function setFreeTool(t) {
+            freeTool = t;
+            document.querySelectorAll('#free-toolbar [data-ft]').forEach(b => { const on = b.dataset.ft === t; b.classList.toggle('bg-brand-yellow', on); b.classList.toggle('text-black', on); b.classList.toggle('text-zinc-300', !on); });
+        }
+        function setFreeWidth(w) {
+            freeWidth = w;
+            document.querySelectorAll('#free-toolbar [data-fw]').forEach(b => b.classList.toggle('bg-zinc-700', +b.dataset.fw === w));
+        }
+        function setFreeColor(c) {
+            freeCurrentColor = c; if (freeTool === 'eraser') setFreeTool('pencil');
+            document.querySelectorAll('#free-toolbar [data-fc]').forEach(b => b.classList.toggle('ring-2', b.dataset.fc === c));
+        }
+        function setupFreeToolbar() {
+            const bar = document.getElementById('free-toolbar'); if (!bar) return;
+            bar.innerHTML = '';
+            const grp = (cls) => { const g = document.createElement('div'); g.className = 'flex items-center gap-1 ' + (cls || ''); bar.appendChild(g); return g; };
+            const btn = (g, html, title, fn, extra) => { const b = document.createElement('button'); b.type = 'button'; b.title = title; b.innerHTML = html; b.className = 'p-1.5 rounded hover:bg-zinc-800 text-zinc-300 transition-all min-w-[30px] h-[30px] flex items-center justify-center leading-none ' + (extra || ''); b.onclick = fn; g.appendChild(b); return b; };
+            const g1 = grp();
+            [['pencil', '<i data-lucide="pencil" class="w-4 h-4"></i>', 'Lápis'], ['bucket', '<i data-lucide="paint-bucket" class="w-4 h-4"></i>', 'Balde'], ['eraser', '<i data-lucide="eraser" class="w-4 h-4"></i>', 'Borracha'],
+             ['line', '╱', 'Linha'], ['rect', '▭', 'Retângulo'], ['circle', '◯', 'Círculo'], ['triangle', '△', 'Triângulo']].forEach(([t, h, ti]) => { const b = btn(g1, h, ti, () => setFreeTool(t), 'text-base'); b.dataset.ft = t; });
+            const g2 = grp();
+            btn(g2, '<i data-lucide="undo" class="w-4 h-4"></i>', 'Desfazer (Ctrl+Z)', () => freeGoto(freeHi - 1));
+            btn(g2, '↷', 'Refazer (Ctrl+Y)', () => freeGoto(freeHi + 1), 'text-base');
+            btn(g2, '<i data-lucide="trash-2" class="w-4 h-4"></i>', 'Limpar', clearFreeCanvas, '!text-red-400');
+            const g3 = grp('bg-zinc-900 px-1.5 py-0.5 rounded border border-brand-border');
+            [[2, 'w-1.5 h-1.5'], [6, 'w-3 h-3'], [14, 'w-4 h-4']].forEach(([w, c]) => { const b = btn(g3, `<div class="${c} bg-white rounded-full"></div>`, 'Espessura', () => setFreeWidth(w), '!p-0 !min-w-[24px] !h-[24px]'); b.dataset.fw = w; });
+            const g4 = grp('flex-wrap justify-center');
+            colors.forEach(c => { const b = document.createElement('button'); b.type = 'button'; b.dataset.fc = c; b.className = 'w-6 h-6 rounded-full border border-zinc-700 ring-white transition-transform hover:scale-110'; b.style.backgroundColor = c; b.onclick = () => setFreeColor(c); g4.appendChild(b); });
+            if (window.lucide) lucide.createIcons();
+            setFreeTool(freeTool); setFreeWidth(freeWidth); setFreeColor(freeCurrentColor);
+        }
+        initFreeCanvas = function () {
+            freeCanvas = document.getElementById('free-paint-canvas'); freeCtx = freeCanvas.getContext('2d');
+            freeCtxClear(); freeHist = []; freeHi = -1; freeSave(); freeDown = false; freeStart = null;
+            setupFreeToolbar(); renderFreeUsers(); fitFreeBoard(); requestAnimationFrame(fitFreeBoard);
+            const pos = e => { const r = freeCanvas.getBoundingClientRect(), t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e; return { x: (t.clientX - r.left) * freeCanvas.width / r.width, y: (t.clientY - r.top) * freeCanvas.height / r.height }; };
+            const seg = (a, b) => {
+                const er = freeTool === 'eraser', col = er ? '#ffffff' : freeCurrentColor, w = er ? freeWidth * 3 : freeWidth;
+                freeLine(a, b, col, w); sendWS({ type: 'FREE_DRAW', x0: a.x, y0: a.y, x1: b.x, y1: b.y, color: col, w });
+            };
+            const down = e => {
+                if (freeWatch) return; e.preventDefault(); const p = pos(e);
+                if (freeTool === 'bucket') { freeFill(p.x, p.y, freeCurrentColor); freeSave(); freeSnap(); return; }
+                if (FREE_SHAPES.includes(freeTool)) { freeStart = p; freeBase = freeCtx.getImageData(0, 0, freeCanvas.width, freeCanvas.height); return; }
+                freeDown = true; freeLast = p; seg(p, p);
+            };
+            const move = e => {
+                if (freeStart) { freeShape(freeStart, pos(e)); e.preventDefault(); return; }
+                if (!freeDown) return;
+                if (e.type === 'mousemove' && e.buttons === 0) { up(e); return; }
+                const p = pos(e); seg(freeLast, p); freeLast = p; e.preventDefault();
+            };
+            const up = e => {
+                if (freeStart) { if (e && e.type !== 'mouseleave' && e.type !== 'blur') freeShape(freeStart, pos(e)); freeStart = null; freeSave(); freeSnap(); return; }
+                if (freeDown) { freeDown = false; freeSave(); freeSnap(); }
+            };
+            freeCanvas.onmousedown = down; freeCanvas.onmousemove = move; freeCanvas.onmouseup = up;
+            freeCanvas.onmouseleave = e => { if (!freeStart) up(e); };
+            freeCanvas.ontouchstart = down; freeCanvas.ontouchmove = move; freeCanvas.ontouchend = up; freeCanvas.ontouchcancel = up;
+            freeCanvas.onmouseenter = e => { if (freeDown) { if (e.buttons & 1) freeLast = pos(e); else up(e); } };
+            if (!window._freeUpBound) {
+                window._freeUpBound = true;
+                ['mouseup', 'touchend', 'touchcancel', 'pointerup', 'blur'].forEach(n => window.addEventListener(n, ev => { if ((freeDown || freeStart) && window._freeUp) window._freeUp(ev); }));
+                document.addEventListener('keydown', e => {
+                    if (!freeOpen || freeWatch || !(e.ctrlKey || e.metaKey) || /INPUT|TEXTAREA/.test(document.activeElement.tagName)) return;
+                    const k = e.key.toLowerCase();
+                    if (k === 'z' && !e.shiftKey) { e.preventDefault(); freeGoto(freeHi - 1); } else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); freeGoto(freeHi + 1); }
+                });
+            }
+            window._freeUp = up;
+        };
+        clearFreeCanvas = function () { if (freeWatch) return; freeCtxClear(); freeSave(); sendWS({ type: 'FREE_CLEAR' }); };
+        watchFree = function (id) {
+            freeWatch = id; freeCtxClear();
+            if (!id && freeHi >= 0) freeCtx.putImageData(freeHist[freeHi], 0, 0); // volta ao meu desenho
+            sendWS({ type: 'FREE_WATCH', targetId: id || '' }); renderFreeUsers(); if (!id) freeSnap();
+        };
+        // sem o botão amarelo "Meu painel": só aparecem os jogadores que estão no modo livre (toque de novo para voltar ao seu painel)
+        renderFreeUsers = function () {
+            const modal = document.getElementById('free-mode-modal');
+            let box = document.getElementById('free-users');
+            if (!box) { box = document.createElement('div'); box.id = 'free-users'; box.className = 'flex flex-wrap items-center justify-center gap-2 text-xs'; modal.children[0].after(box); }
+            if (!activeRoom) return;
+            box.innerHTML = '';
+            const others = activeRoom.players.filter(p => p.free && p.id !== currentUser.id);
+            others.forEach(p => {
+                const on = freeWatch === p.id, b = document.createElement('button');
+                b.textContent = on ? '👁 ' + trf('Acompanhando {n} ao vivo', { n: p.name || tr('Anônimo') }) + ' ✕' : '🔴 ' + trf('{n} está desenhando', { n: p.name || tr('Anônimo') });
+                b.className = 'px-3 py-1.5 rounded-lg font-bold border ' + (on ? 'bg-brand-yellow text-black border-brand-yellow' : 'bg-zinc-900 text-zinc-300 border-brand-border');
+                b.onclick = () => watchFree(on ? null : p.id); box.appendChild(b);
+            });
+            box.classList.toggle('hidden', !others.length);
+            const watching = freeWatch && activeRoom.players.find(q => q.id === freeWatch);
+            const live = document.getElementById('free-live-badge');
+            if (live) { live.classList.toggle('hidden', !watching); if (watching) live.textContent = trf('👁 Acompanhando {n} ao vivo', { n: watching.name || tr('Anônimo') }); }
+            const tb = document.getElementById('free-toolbar'); if (tb) tb.style.visibility = freeWatch ? 'hidden' : 'visible';
+            const fc = document.getElementById('free-paint-canvas'); if (fc) fc.style.cursor = freeWatch ? 'default' : 'crosshair';
+            requestAnimationFrame(fitFreeBoard);
+        };
 
         restoreGoogleSession();
         connectServer();
