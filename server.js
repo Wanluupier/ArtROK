@@ -154,6 +154,12 @@ function view(room, to) {
   };
 }
 const toRoom = (room, fn) => { for (const pl of room.players.values()) fn(pl); };
+// avisa quem está desenhando no modo livre quantas pessoas estão assistindo
+function notifyWatchers(room, id) {
+  const t = room && room.players.get(id); if (!t) return;
+  let n = 0; for (const o of room.players.values()) if (o.freeWatch === id) n++;
+  t.send({ type: 'FREE_WATCHERS', count: n });
+}
 const broadcastRoom = room => toRoom(room, pl => pl.send({ type: 'ROOM', room: view(room, pl) }));
 const sys = (room, key, v) => toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'system', text: tx(pl.lang, key, v), ok: key === 'guessed' }));
 
@@ -172,8 +178,10 @@ function isBanned(p, room) { const now = Date.now(); for (const k of [p.id, p.de
 function leaveRoom(p, silent) {
   const room = p.roomId && rooms.get(p.roomId); if (!room) { p.roomId = null; return; }
   room.players.delete(p.id); room.order = room.order.filter(i => i !== p.id); room.votes.delete(p.id);
+  const prevW = p.freeWatch;
   p.roomId = null; p.free = false; p.freeWatch = null; p.guessed = false;
   for (const o of room.players.values()) if (o.freeWatch === p.id) { o.freeWatch = null; o.send({ type: 'FREE_OFF', from: p.id }); }
+  if (prevW) notifyWatchers(room, prevW);
   if (!silent) sys(room, 'left', { n: p.shownName });
   if (room.players.size === 0) {
     clearInterval(room.interval); clearTimeout(room.timer); room.interval = room.timer = null; room.phase = 'waiting'; room.drawerId = ''; room.snapshot = null; room.emptySince = Date.now();
@@ -230,7 +238,7 @@ function nextRound(room) {
   room.phase = 'drawing'; room.guessed = new Set(); room.reports = new Set(); room.timeLeft = ROUND_SECONDS; room.snapshot = null;
   toRoom(room, pl => { pl.guessed = false; });
   const d = room.players.get(drawer);
-  if (d.free) { d.free = false; d.send({ type: 'FREE_BLOCKED' }); for (const o of room.players.values()) if (o.freeWatch === d.id) { o.freeWatch = null; o.send({ type: 'FREE_OFF', from: d.id }); } }
+  if (d.free) { d.free = false; d.send({ type: 'FREE_BLOCKED' }); for (const o of room.players.values()) if (o.freeWatch === d.id) { o.freeWatch = null; o.send({ type: 'FREE_OFF', from: d.id }); } d.send({ type: 'FREE_WATCHERS', count: 0 }); }
   toRoom(room, pl => pl.send({ type: 'CANVAS_CLEAR' }));
   broadcastRoom(room);                      // primeiro o estado da sala (o cliente zera a palavra quando o desenhista muda)...
   d.send({ type: 'WORD', word: room.word }); // ...depois a palavra secreta só para quem desenha
@@ -402,11 +410,14 @@ function onMessage(p, m) {
       room.snapshot = m.data; toRoom(room, pl => { if (pl !== p) pl.send({ type: 'SNAPSHOT', data: m.data }); }); break;
     }
     case 'FREE_ON': if (room && !(room.phase === 'drawing' && room.drawerId === p.id)) { p.free = true; broadcastRoom(room); } break;
-    case 'FREE_OFF': if (room) { p.free = false; p.freeSnap = null; toRoom(room, pl => { if (pl.freeWatch === p.id) { pl.freeWatch = null; pl.send({ type: 'FREE_OFF', from: p.id }); } }); broadcastRoom(room); } break;
+    case 'FREE_OFF': if (room) { const prevW = p.freeWatch; p.freeWatch = null; if (prevW) notifyWatchers(room, prevW); p.free = false; p.freeSnap = null; p.send({ type: 'FREE_WATCHERS', count: 0 }); toRoom(room, pl => { if (pl.freeWatch === p.id) { pl.freeWatch = null; pl.send({ type: 'FREE_OFF', from: p.id }); } }); broadcastRoom(room); } break;
     case 'FREE_WATCH': {
       if (!room) break; const t = m.targetId ? room.players.get(String(m.targetId)) : null;
-      p.freeWatch = t && t.free ? t.id : null;
+      const prevW = p.freeWatch;
+      p.freeWatch = t && t.free && t.id !== p.id ? t.id : null;
       if (p.freeWatch) p.send({ type: 'FREE_SNAP', from: t.id, data: t.freeSnap || null });
+      if (prevW && prevW !== p.freeWatch) notifyWatchers(room, prevW);
+      if (p.freeWatch) notifyWatchers(room, p.freeWatch);
       break;
     }
     case 'FREE_DRAW': case 'FREE_CLEAR': case 'FREE_SNAP': {
