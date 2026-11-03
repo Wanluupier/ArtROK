@@ -85,6 +85,15 @@
         #canvas-container-box.is-fs { background:#0A0A0A; padding:10px; }
         .pseudo-fs { position:fixed !important; inset:0; z-index:70; width:100vw; height:100dvh !important; }
         #canvas-container-box.pseudo-fs { background:#0A0A0A; padding:10px; }
+
+        /* o painel nunca pode crescer com o conteúdo (evita esticar para baixo com o tempo) */
+        #game-board { contain: size; }
+        #game-screen > * { min-height: 0; }
+
+        /* contador de partidas vencidas no canto do avatar */
+        .win-badge { position:absolute; right:-4px; bottom:-4px; min-width:15px; height:15px; padding:0 3px; border-radius:999px; background:#FFC800; color:#000; border:1px solid #000; font:900 9px/13px ui-monospace,monospace; text-align:center; z-index:2; }
+        .win-badge.win-inf { min-width:20px; height:18px; right:-6px; bottom:-6px; font-size:15px; line-height:15px; background:linear-gradient(135deg,#FFC800,#ff7a00,#FFC800); background-size:200% 200%; animation:infShine 2s linear infinite; box-shadow:0 0 8px #FFC800; }
+        @keyframes infShine { 0% { background-position:0% 50%; } 100% { background-position:200% 50%; } }
     </style>
 </head>
 <body class="bg-brand-dark text-white font-sans antialiased min-h-screen flex flex-col justify-between selection:bg-brand-yellow selection:text-black">
@@ -198,7 +207,7 @@
     </main>
 
     <!-- TELA DE JOGO -->
-    <main id="game-screen" class="flex-1 max-w-7xl w-full mx-auto p-2 sm:p-4 flex-col lg:grid-cols-12 gap-3 lg:gap-4 lg:h-[calc(100vh-75px)] overflow-y-auto lg:overflow-hidden">
+    <main id="game-screen" class="flex-1 max-w-7xl w-full mx-auto p-2 sm:p-4 flex-col lg:grid-cols-12 lg:grid-rows-[minmax(0,1fr)] gap-3 lg:gap-4 lg:h-[calc(100vh-75px)] overflow-y-auto lg:overflow-hidden">
         
         <!-- PAINEL ESQUERDO: JOGADORES DA SALA -->
         <div class="lg:col-span-3 bg-brand-card rounded-xl p-3 border border-brand-border flex flex-col justify-between shadow-lg h-48 lg:h-full">
@@ -372,7 +381,7 @@
 
             <div>
                 <label class="text-xs font-bold text-zinc-300 block mb-1">Nome</label>
-                <input type="text" id="modal-name-input" maxlength="50" placeholder="" class="w-full bg-zinc-900 border border-brand-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-yellow">
+                <input type="text" id="modal-name-input" maxlength="15" placeholder="" class="w-full bg-zinc-900 border border-brand-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-yellow">
             </div>
 
             <div>
@@ -834,6 +843,12 @@
             showTransition("Desenho Pulado!", 1500, () => resetRound());
         }
 
+        const escHtml = t => String(t == null ? '' : t).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        function winBadge(n) {
+            n = n || 0;
+            if (n <= 0) return '';
+            return n >= 10 ? '<span class="win-badge win-inf">∞</span>' : `<span class="win-badge">★${n}</span>`;
+        }
         function renderPlayersList() {
             if (!activeRoom || !activeRoom.players) return;
 
@@ -850,13 +865,16 @@
                 item.className = `p-1.5 sm:p-2 rounded-lg bg-zinc-900 border ${isDrawer ? 'border-brand-yellow' : 'border-brand-border'} flex items-center justify-between text-xs transition-all`;
 
                 item.innerHTML = `
-                    <div class="flex items-center space-x-2 overflow-hidden">
-                        <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border border-brand-yellow overflow-hidden flex items-center justify-center flex-shrink-0">
-                            <img src="${player.avatar}" class="w-full h-full object-cover">
+                    <div class="flex items-center space-x-2 min-w-0">
+                        <div class="relative flex-shrink-0">
+                            <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border border-brand-yellow overflow-hidden flex items-center justify-center">
+                                <img src="${player.avatar}" class="w-full h-full object-cover">
+                            </div>
+                            ${winBadge(player.wins)}
                         </div>
                         <div class="truncate">
                             <div class="flex items-center space-x-1">
-                                <span class="font-bold text-white truncate">${displayName}</span>
+                                <span class="font-bold text-white truncate">${escHtml(displayName)}</span>
                                 ${isDrawer ? '<i data-lucide="pencil" class="w-3 h-3 text-brand-yellow flex-shrink-0"></i>' : ''}
                             </div>
                             <span class="text-[10px] text-brand-yellow font-mono">${player.score || 0} pts</span>
@@ -939,6 +957,7 @@
 
             const moveDraw = (e) => {
                 if (!isDrawing || !activeRoom || activeRoom.drawerId !== currentUser.id) return;
+                if (e.type === 'mousemove' && e.buttons === 0) { stopDraw(); return; }
                 const pos = getPos(e);
                 drawLineLocal(lastX, lastY, pos.x, pos.y, currentColor, currentLineWidth, currentTool === 'eraser');
                 
@@ -961,6 +980,15 @@
             canvas.addEventListener('touchstart', startDraw);
             canvas.addEventListener('touchmove', moveDraw);
             canvas.addEventListener('touchend', stopDraw);
+            canvas.addEventListener('touchcancel', stopDraw);
+            // voltou para o painel: se ainda está segurando, continua do ponto certo; se soltou, para
+            canvas.addEventListener('mouseenter', e => {
+                if (!isDrawing) return;
+                if (e.buttons & 1) { const p = getPos(e); lastX = p.x; lastY = p.y; } else stopDraw();
+            });
+            // soltou o clique/dedo em qualquer lugar (inclusive fora do painel): para de riscar
+            ['mouseup', 'touchend', 'touchcancel', 'pointerup', 'pointercancel', 'blur'].forEach(n => window.addEventListener(n, stopDraw));
+            document.addEventListener('visibilitychange', () => { if (document.hidden) stopDraw(); });
         }
 
         function drawLineLocal(x0, y0, x1, y1, color, width, isEraser) {
@@ -1259,8 +1287,8 @@
             const nameInput = document.getElementById('modal-name-input');
             const bioInput = document.getElementById('modal-bio-input');
 
-            if (nameInput) currentUser.name = nameInput.value.trim();
-            if (bioInput) currentUser.bio = bioInput.value.trim();
+            if (nameInput) currentUser.name = nameInput.value.trim().slice(0, 15);
+            if (bioInput) currentUser.bio = bioInput.value.trim().slice(0, 50);
 
             const nameDisplay = document.getElementById('nav-username');
             if (nameDisplay) {
@@ -1308,7 +1336,7 @@
             try { let d = localStorage.getItem('artrok_dev'); if (!d) { d = 'd' + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem('artrok_dev', d); } return d; } catch (e) { return ''; }
         }
         function sendProfile() {
-            sendWS({ type: 'PROFILE', id: currentUser.id, device: deviceToken(), name: currentUser.name, av: Math.max(0, presetAvatarsList.indexOf(currentUser.avatar)), bio: currentUser.bio, lang: currentLang, hasImg: presetAvatarsList.indexOf(currentUser.avatar) < 0, img: (presetAvatarsList.indexOf(currentUser.avatar) < 0 && imgSentOnConn !== currentUser.avatar) ? currentUser.avatar : undefined, gid: googleUser ? googleUser.sub : undefined, gtoken: googleToken || undefined });
+            sendWS({ type: 'PROFILE', id: currentUser.id, device: deviceToken(), name: (currentUser.name || '').slice(0, 15), av: Math.max(0, presetAvatarsList.indexOf(currentUser.avatar)), bio: (currentUser.bio || '').slice(0, 50), lang: currentLang, hasImg: presetAvatarsList.indexOf(currentUser.avatar) < 0, img: (presetAvatarsList.indexOf(currentUser.avatar) < 0 && imgSentOnConn !== currentUser.avatar) ? currentUser.avatar : undefined, gid: googleUser ? googleUser.sub : undefined, gtoken: googleToken || undefined });
             if (wsReady && presetAvatarsList.indexOf(currentUser.avatar) < 0) imgSentOnConn = currentUser.avatar;
         }
         function connectServer() {
@@ -1384,17 +1412,33 @@
             if (p.imgRev && c && c.rev === p.imgRev) return c.img;
             return presetAvatarsList[p.av] || presetAvatarsList[4];
         }
+        let winsById = {};
         function applyRoom(s) {
             const isNew = !activeRoom || activeRoom.id !== s.id;
+            if (isNew) winsById = {};
+            const oldWins = {}; if (activeRoom) activeRoom.players.forEach(p => oldWins[p.id] = p.wins || 0);
             if (activeRoom && activeRoom.drawerId !== s.drawerId) myWord = '';
             activeRoom = {
                 id: s.id, name: s.name, code: s.code, phase: s.phase, hint: s.hint, drawerId: s.drawerId,
                 theme: themeFor(s.themeId, s.themeName || s.name),
-                players: s.players.map(p => ({ id: p.id, name: p.name, score: p.score, free: p.free, bio: p.bio, avatar: avatarOf(p) })),
+                players: s.players.map(p => ({ id: p.id, name: p.name, score: p.score, free: p.free, bio: p.bio, avatar: avatarOf(p), wins: p.wins != null ? p.wins : (winsById[p.id] || 0), serverWins: p.wins != null })),
                 guessedPlayers: s.players.filter(p => p.guessed).map(p => p.id), currentWord: ''
             };
             if (isNew) enterGameUI();
+            activeRoom.players.forEach(p => { if (p.serverWins && (oldWins[p.id] || 0) < 10 && p.wins >= 10) setTimeout(() => SFX.infinity(), 2600); });
             refreshRoomUI();
+        }
+        // conta a partida vencida (usa o valor do servidor se ele mandar "wins"; senão conta aqui na sala)
+        function noteWinner(m) {
+            if (!activeRoom) return;
+            const ps = activeRoom.players;
+            if (ps.some(p => p.serverWins)) return;
+            let w = (m.id && ps.find(p => p.id === m.id)) || ps.filter(p => (p.name || '') === (m.name || '')).sort((a, b) => (b.score || 0) - (a.score || 0))[0];
+            if (!w) return;
+            const before = winsById[w.id] || 0;
+            winsById[w.id] = before + 1; w.wins = before + 1;
+            renderPlayersList();
+            if (before < 10 && w.wins >= 10) setTimeout(() => SFX.infinity(), 2600);
         }
         function enterGameUI() {
             const lobby = document.getElementById('lobby-screen'), game = document.getElementById('game-screen');
@@ -1466,12 +1510,12 @@
                 case 'TICK': document.getElementById('game-timer').textContent = `${m.t}s`; if (m.t > 0 && m.t <= 5) SFX.tick(); break;
                 case 'CHAT': addChatMessage(m.channel, m.text); if (m.channel === 'system' && (m.ok || m.text.includes('acertou'))) SFX.correct(); break;
                 case 'CHAT_HISTORY': m.items.forEach(t => addChatMessage('public', t)); break;
-                case 'BANNED': SFX.ban(); showBanned(m); break;
+                case 'BANNED': if (activeRoom) SFX.ban(); else SFX.blocked(); showBanned(m); break;
                 case 'ERROR': showAlertBanner(m.msg); break;
                 case 'ROUND_END': showRoundEnd(m.title, m.word); if (m.kind === 'skip') SFX.skip(); else if (m.kind === 'report') SFX.report(); else SFX.roundEnd(); break;
                 case 'GAME_OVER':
                     document.getElementById('winner-text').textContent = trf('O jogador {n} venceu a partida com {s} pontos!', { n: m.name, s: m.score });
-                    const wm = document.getElementById('winner-modal'); wm.classList.remove('hidden'); SFX.win(); setTimeout(() => wm.classList.add('hidden'), 10000); break;
+                    const wm = document.getElementById('winner-modal'); wm.classList.remove('hidden'); SFX.win(); noteWinner(m); setTimeout(() => wm.classList.add('hidden'), 10000); break;
                 case 'CANVAS_DRAW': drawRemoteLine(m.x0, m.y0, m.x1, m.y1, m.color, m.lineWidth, m.isEraser); break;
                 case 'CANVAS_CLEAR': hist = []; hidx = -1; clearCanvasLocal(); break;
                 case 'FREE_DRAW': if (freeWatch === m.from && freeCtx) freeLine({ x: m.x0, y: m.y0 }, { x: m.x1, y: m.y1 }, m.color, m.w); break;
@@ -1540,7 +1584,16 @@
                 beep(1047, .9, .7, 'sine', .14);
                 for (let i = 0; i < 14; i++) noise(.12, 1.0 + i * 0.11 + Math.random() * 0.05, .09, 2500 + Math.random() * 2500);
             },
-            ban: () => beep(150, .6, 0, 'square', .12)
+            // acabou de ser banido: pancada + queda grave
+            ban: () => { noise(.35, 0, .16, 220); beep(120, .25, 0, 'sawtooth', .22); beep(90, .7, .22, 'square', .2, 40); beep(60, .9, .3, 'sine', .25); },
+            // tentou entrar numa sala onde ainda está banido: buzzer de "acesso negado"
+            blocked: () => { beep(220, .14, 0, 'square', .16); beep(220, .14, .2, 'square', .16); beep(150, .45, .42, 'sawtooth', .16, 90); },
+            // chegou ao infinito: arpejo brilhante + varredura + brilhos
+            infinity: () => {
+                [523, 659, 784, 988, 1175, 1319, 1568, 2093].forEach((f, i) => { beep(f, .35, i * .07, 'triangle', .18); beep(f * 2, .25, i * .07 + .03, 'sine', .07); });
+                beep(262, 1.3, .6, 'sawtooth', .08, 524); beep(1568, 1.5, .6, 'sine', .16, 3136); noise(.7, .6, .06, 8000);
+                for (let i = 0; i < 10; i++) beep(2000 + Math.random() * 2500, .12, 1 + i * .09, 'sine', .07);
+            }
         };
 
         // ---- Lista de jogadores: ranking por pontos; clicar no jogador abre as opções (votar para banir) ----
@@ -1635,6 +1688,11 @@
             if (n !== 'mouseleave') drawShape(shapeStart, pt(e));
             shapeStart = null; saveCanvasState();
         }, true));
+        ['mouseup', 'touchend', 'touchcancel', 'blur'].forEach(n => window.addEventListener(n, e => {
+            if (!shapeStart) return;
+            if (n === 'mouseup') drawShape(shapeStart, pt(e));
+            shapeStart = null; saveCanvasState();
+        }));
         (function () {
             const bar = document.querySelector('#drawing-tools > div'), undoBtn = bar.querySelector('[title="Desfazer"]');
             const mk = (id, label, title, fn) => { const b = document.createElement('button'); b.id = id; b.title = title; b.textContent = label; b.className = 'rounded hover:bg-zinc-800 text-zinc-300 transition-all text-base leading-none w-7 h-7'; b.onclick = fn; return b; };
@@ -1661,12 +1719,20 @@
             const pos = e => { const r = freeCanvas.getBoundingClientRect(), t = (e.touches && e.touches[0]) || e; return { x: (t.clientX - r.left) * freeCanvas.width / r.width, y: (t.clientY - r.top) * freeCanvas.height / r.height }; };
             const down = e => { if (freeWatch) return; freeDown = true; freeLast = pos(e); e.preventDefault(); };
             const move = e => {
-                if (!freeDown) return; const p = pos(e); freeLine(freeLast, p, freeCurrentColor, 4);
+                if (!freeDown) return;
+                if (e.type === 'mousemove' && e.buttons === 0) { up(); return; }
+                const p = pos(e); freeLine(freeLast, p, freeCurrentColor, 4);
                 sendWS({ type: 'FREE_DRAW', x0: freeLast.x, y0: freeLast.y, x1: p.x, y1: p.y, color: freeCurrentColor, w: 4 }); freeLast = p; e.preventDefault();
             };
             const up = () => { if (freeDown) { freeDown = false; sendWS({ type: 'FREE_SNAP', data: freeCanvas.toDataURL('image/png') }); } };
             freeCanvas.onmousedown = down; freeCanvas.onmousemove = move; freeCanvas.onmouseup = up; freeCanvas.onmouseleave = up;
-            freeCanvas.ontouchstart = down; freeCanvas.ontouchmove = move; freeCanvas.ontouchend = up;
+            freeCanvas.ontouchstart = down; freeCanvas.ontouchmove = move; freeCanvas.ontouchend = up; freeCanvas.ontouchcancel = up;
+            freeCanvas.onmouseenter = e => { if (freeDown) { if (e.buttons & 1) freeLast = pos(e); else up(); } };
+            if (!window._freeUpBound) {
+                window._freeUpBound = true;
+                ['mouseup', 'touchend', 'touchcancel', 'pointerup', 'blur'].forEach(n => window.addEventListener(n, () => { if (freeDown && window._freeUp) window._freeUp(); }));
+            }
+            window._freeUp = up;
         }
         function clearFreeCanvas() { if (freeWatch) return; freeCtxClear(); sendWS({ type: 'FREE_CLEAR' }); }
         function watchFree(id) { freeWatch = id; freeCtxClear(); sendWS({ type: 'FREE_WATCH', targetId: id || '' }); renderFreeUsers(); }
@@ -1781,7 +1847,7 @@
                 isGoogleLoggedIn = true;
                 try { const saved = JSON.parse(ls('artrok_gprof_' + googleUser.sub) || 'null'); if (saved) applyProfile(saved); } catch (e) {}
                 if (!currentUser.name && googleUser.name) {
-                    currentUser.name = googleUser.name.slice(0, 50);
+                    currentUser.name = googleUser.name.slice(0, 15);
                     const nd = document.getElementById('nav-username'); if (nd) nd.textContent = currentUser.name;
                 }
                 persistProfile(); setGoogleButton();
@@ -1896,10 +1962,19 @@
             const w = box.clientWidth, h = box.clientHeight;
             if (!w || !h) return;
             const ar = canvas.width / canvas.height;
+            const fs = document.getElementById('canvas-container-box').classList.contains('is-fs');
             let cw = w, ch = w / ar;
-            if (ch > h) { ch = h; cw = h * ar; }
-            canvas.style.width = Math.floor(cw) + 'px';
-            canvas.style.height = Math.floor(ch) + 'px';
+            if (fs) {
+                // tela cheia: o desenho cobre TODA a área branca (zoom); o que sobra fica cortado
+                // e continua acessível ao sair da tela cheia
+                if (ch < h) { ch = h; cw = h * ar; }
+                canvas.style.width = Math.ceil(cw) + 'px';
+                canvas.style.height = Math.ceil(ch) + 'px';
+            } else {
+                if (ch > h) { ch = h; cw = h * ar; }
+                canvas.style.width = Math.floor(cw) + 'px';
+                canvas.style.height = Math.floor(ch) + 'px';
+            }
         }
         if (window.ResizeObserver) new ResizeObserver(fitGameCanvas).observe(document.getElementById('game-board'));
         window.addEventListener('resize', fitGameCanvas);
@@ -2016,7 +2091,7 @@
         }
         function applyProfile(pr) {
             if (!pr) return;
-            if (typeof pr.name === 'string') currentUser.name = pr.name.slice(0, 50);
+            if (typeof pr.name === 'string') currentUser.name = pr.name.slice(0, 15);
             if (typeof pr.bio === 'string') currentUser.bio = pr.bio.slice(0, 50);
             if (Number.isInteger(pr.av) && presetAvatarsList[pr.av]) currentUser.avatar = presetAvatarsList[pr.av];
             else if (safeImg(pr.img)) currentUser.avatar = pr.img;
