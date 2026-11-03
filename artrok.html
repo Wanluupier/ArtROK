@@ -354,9 +354,7 @@
         <div id="free-stage" class="flex-1 min-h-0 flex items-center justify-center">
             <div id="free-board" class="relative bg-white rounded-xl overflow-hidden shadow-2xl border-2 border-brand-border">
                 <canvas id="free-paint-canvas" width="700" height="450" class="block w-full h-full cursor-crosshair bg-white"></canvas>
-                <div id="free-live-badge" class="hidden absolute top-2 left-2 bg-black/80 text-white px-2.5 py-1 rounded border border-zinc-700 text-[11px] font-semibold"></div>
-                <button id="free-watchers" type="button" class="hidden absolute top-2 right-2 z-10 bg-black/80 text-brand-yellow px-2.5 py-1 rounded border border-brand-yellow/50 text-[11px] font-bold"></button>
-                <div id="free-watchers-list" class="hidden absolute top-10 right-2 z-10 bg-black/90 text-white px-3 py-2 rounded border border-zinc-700 text-[11px] space-y-1 max-w-[70%]"></div>
+                                <div id="free-watchers" class="hidden absolute top-2 right-2 z-10 bg-black/80 text-white px-2.5 py-1 rounded border border-zinc-700 text-xs font-bold items-center gap-1.5 pointer-events-none"></div>
             </div>
         </div>
         <div id="free-toolbar" class="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 bg-brand-card p-2 rounded-xl border border-brand-border shadow-md"></div>
@@ -2473,7 +2471,7 @@
             const others = activeRoom.players.filter(p => p.free && p.id !== currentUser.id);
             others.forEach(p => {
                 const on = freeWatch === p.id, b = document.createElement('button');
-                b.textContent = on ? '👁 ' + trf('Acompanhando {n} ao vivo', { n: p.name || tr('Anônimo') }) + ' ✕' : '🔴 ' + trf('{n} está desenhando', { n: p.name || tr('Anônimo') });
+                b.textContent = '🔴 ' + trf('{n} está desenhando', { n: p.name || tr('Anônimo') });
                 b.className = 'px-3 py-1.5 rounded-lg font-bold border ' + (on ? 'bg-brand-yellow text-black border-brand-yellow' : 'bg-zinc-900 text-zinc-300 border-brand-border');
                 b.onclick = () => watchFree(on ? null : p.id); box.appendChild(b);
             });
@@ -2491,12 +2489,11 @@
         // ===== Modo livre durante a sua vez de desenhar (só assistir) + aviso de quem está assistindo =====
         let freeViewOnly = false, freeWatchers = [];
         function updateWatchersUI() {
-            const b = document.getElementById('free-watchers'), l = document.getElementById('free-watchers-list'); if (!b || !l) return;
+            const b = document.getElementById('free-watchers'); if (!b) return;
             const n = freeWatchers.length, show = n > 0 && freeOpen && !freeWatch && !freeViewOnly;
-            b.classList.toggle('hidden', !show); if (!show) l.classList.add('hidden');
-            b.textContent = '👁 ' + n; l.innerHTML = '';
-            freeWatchers.forEach(nm => { const d = document.createElement('div'); d.textContent = nm; l.appendChild(d); });
-            b.onclick = () => l.classList.toggle('hidden');
+            b.classList.toggle('hidden', !show); b.classList.toggle('flex', show);
+            b.innerHTML = '<svg viewBox="0 0 24 24" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span></span>';
+            b.lastChild.textContent = String(n);
         }
         toggleFreeModeInRoom = function () {
             const modal = document.getElementById('free-mode-modal');
@@ -2515,7 +2512,7 @@
         const _onServerFree = onServer;
         onServer = function (m) {
             if (m && m.type === 'FREE_BLOCKED' && freeViewOnly) return;
-            if (m && m.type === 'FREE_WATCHERS') { freeWatchers = (Array.isArray(m.names) ? m.names : []).map(x => String(x || '').slice(0, 20)).slice(0, 30); updateWatchersUI(); return; }
+            if (m && m.type === 'FREE_WATCHERS') { const c = typeof m.count === 'number' ? m.count : (Array.isArray(m.names) ? m.names.length : 0); freeWatchers = new Array(Math.max(0, Math.min(99, c | 0))).fill(''); updateWatchersUI(); return; }
             _onServerFree(m);
         };
 
