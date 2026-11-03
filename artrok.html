@@ -88,6 +88,10 @@
 
         /* o painel nunca pode crescer com o conteúdo (evita esticar para baixo com o tempo) */
         #game-board { contain: size; }
+        /* só o desenho é branco: a área em volta não é mais um "branco falso" */
+        #canvas-container-box:not(.is-fs) #game-board { background: transparent !important; border-color: transparent !important; box-shadow: none !important; overflow: visible; }
+        #canvas-container-box:not(.is-fs) #paint-canvas { border-radius: 12px; box-shadow: 0 0 0 2px #262626, 0 10px 25px rgba(0,0,0,.5); }
+        #canvas-container-box.is-fs #paint-canvas { border-radius: 0; box-shadow: none; }
         #game-screen > * { min-height: 0; }
 
         /* contador de partidas vencidas no canto do avatar */
@@ -407,10 +411,10 @@
             <button onclick="closeCreateCustomModal()" class="absolute top-4 right-4 text-zinc-400 hover:text-white">
                 <i data-lucide="x" class="w-5 h-5"></i>
             </button>
-            <h3 class="text-base sm:text-lg font-black text-brand-yellow">Criar Sala Personalizada</h3>
+            <h3 id="custom-modal-title" class="text-base sm:text-lg font-black text-brand-yellow">Criar Sala Personalizada</h3>
             <div>
                 <label class="text-xs font-bold text-zinc-300 block mb-1">Nome da Sala</label>
-                <input type="text" id="custom-room-name-input" maxlength="30" placeholder="Ex: Sala dos Amigos" class="w-full bg-zinc-900 border border-brand-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-yellow">
+                <input type="text" id="custom-room-name-input" maxlength="30" placeholder="" class="w-full bg-zinc-900 border border-brand-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-yellow">
             </div>
             <div>
                 <label class="text-xs font-bold text-zinc-300 block mb-1">Tema</label>
@@ -427,9 +431,13 @@
             </div>
             <div>
                 <label id="custom-words-label" class="text-xs font-bold text-zinc-300 block mb-1">Palavras para desenhar (opcional)</label>
-                <textarea id="custom-room-words-input" rows="4" placeholder="Robert, Ricardo, Marcos..." onblur="normalizeCustomWordsBox()" class="w-full bg-zinc-900 border border-brand-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-yellow resize-none"></textarea>
+                <div class="flex gap-2">
+                    <input type="text" id="custom-word-input" maxlength="15" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomWord();}" class="flex-1 min-w-0 bg-zinc-900 border border-brand-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-yellow">
+                    <button type="button" onclick="addCustomWord()" class="px-3 bg-brand-yellow text-black font-bold rounded-lg text-xs uppercase hover:bg-brand-yellowHover">Adicionar</button>
+                </div>
+                <div id="custom-words-list" class="flex flex-wrap gap-1.5 mt-2 max-h-32 overflow-y-auto"></div>
             </div>
-            <button onclick="saveCustomRoom()" class="w-full py-2.5 bg-brand-yellow text-black font-bold rounded-xl hover:bg-brand-yellowHover text-xs uppercase">
+            <button id="custom-save-btn" onclick="saveCustomRoom()" class="w-full py-2.5 bg-brand-yellow text-black font-bold rounded-xl hover:bg-brand-yellowHover text-xs uppercase">
                 Criar Sala
             </button>
         </div>
@@ -635,7 +643,7 @@
             setupPlayerJoin(activeRoom);
         }
 
-        function openCreateCustomModal() { document.getElementById('create-custom-modal').classList.remove('hidden'); }
+        function openCreateCustomModal() { customEditId = null; setCustomModalMode(); resetCustomForm(); document.getElementById('create-custom-modal').classList.remove('hidden'); }
         function closeCreateCustomModal() { document.getElementById('create-custom-modal').classList.add('hidden'); }
 
         function saveCustomRoom() {
@@ -673,7 +681,10 @@
                             <span class="text-xs text-zinc-400 font-mono">${tr('Tema:')} ${esc(room.theme.name[currentLang])}</span>
                         </div>
                     </div>
-                    <button onclick="enterCustomRoom('${room.id}')" class="px-4 py-2 bg-brand-yellow text-black font-bold rounded-xl text-xs uppercase">${tr('ENTRAR')}</button>
+                    <div class="flex items-center space-x-2">
+                        ${room.mine ? `<button onclick="openEditCustomRoom('${room.id}')" title="${tr('Editar')}" class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-brand-yellow font-bold rounded-xl text-xs border border-brand-border">✏️</button>` : ''}
+                        <button onclick="enterCustomRoom('${room.id}')" class="px-4 py-2 bg-brand-yellow text-black font-bold rounded-xl text-xs uppercase">${tr('ENTRAR')}</button>
+                    </div>
                 `;
                 container.appendChild(card);
             });
@@ -1399,7 +1410,8 @@
             lobbyRooms = list;
             roomsData.forEach(r => { const l = list.find(x => x.id === r.id); r.players = new Array(l ? l.count : 0); });
             customRoomsData = list.filter(x => x.kind === 'custom').map(x => ({
-                id: x.id, name: `${x.name} (${x.count}/10)`, theme: themeFor(x.themeId, x.themeName || x.name), players: []
+                id: x.id, name: `${x.name} (${x.count}/10)`, rawName: x.name, themeId: x.themeId, words: x.words || null, theme: themeFor(x.themeId, x.themeName || x.name), players: [],
+                mine: !!(x.mine || (googleUser && (x.owner === googleUser.sub || x.gid === googleUser.sub)))
             }));
             renderRooms(); renderCustomRooms();
         }
@@ -1872,17 +1884,50 @@
             if (id === 'outros') { const n = name || 'Outros'; return { id: 'outros', name: { pt: n, en: n }, icon: 'sparkles', words: [] }; }
             return roomThemes[0];
         }
-        function parseCustomWords(txt) {
-            const seen = new Set(), out = [];
-            String(txt || '').split(/[\n,;]+/).forEach(w => {
-                w = w.trim().slice(0, 15).trim().toUpperCase(); // limite de 15 caracteres, sem avisos
-                if (w && !seen.has(w)) { seen.add(w); out.push(w); }
+        let customWords = [], customEditId = null;
+        function cleanWord(w) { return String(w || '').trim().slice(0, 15).trim().toUpperCase(); }
+        function renderCustomWords() {
+            const box = document.getElementById('custom-words-list'); if (!box) return;
+            box.innerHTML = '';
+            customWords.forEach((w, i) => {
+                const chip = document.createElement('span');
+                chip.className = 'inline-flex items-center gap-1 bg-zinc-900 border border-brand-border rounded-full pl-2.5 pr-1 py-0.5 text-[11px] font-bold text-white';
+                chip.appendChild(document.createTextNode(w));
+                const x = document.createElement('button');
+                x.type = 'button'; x.textContent = '✕'; x.title = tr('Remover');
+                x.className = 'w-4 h-4 rounded-full bg-red-600 hover:bg-red-700 text-white text-[9px] leading-none flex items-center justify-center';
+                x.onclick = () => { customWords.splice(i, 1); renderCustomWords(); };
+                chip.appendChild(x); box.appendChild(chip);
             });
-            return out.slice(0, 300);
         }
-        function normalizeCustomWordsBox() {
-            const box = document.getElementById('custom-room-words-input');
-            if (box) box.value = parseCustomWords(box.value).join(', ');
+        function addCustomWord() {
+            const inp = document.getElementById('custom-word-input'); if (!inp) return;
+            const w = cleanWord(inp.value);
+            if (!w) { flagField(inp); return; }
+            if (!customWords.includes(w) && customWords.length < 300) customWords.push(w);
+            inp.value = ''; renderCustomWords(); inp.focus();
+        }
+        function resetCustomForm() {
+            customWords = []; renderCustomWords();
+            document.getElementById('custom-room-name-input').value = '';
+            document.getElementById('custom-word-input').value = '';
+            document.getElementById('custom-room-theme-select').value = 'alimentos';
+            onCustomThemeChange();
+        }
+        function setCustomModalMode() {
+            const edit = !!customEditId;
+            document.getElementById('custom-modal-title').textContent = tr(edit ? 'Editar Sala Personalizada' : 'Criar Sala Personalizada');
+            document.getElementById('custom-save-btn').textContent = tr(edit ? 'Salvar Alterações' : 'Criar Sala');
+        }
+        function openEditCustomRoom(id) {
+            const room = customRoomsData.find(r => r.id === id); if (!room) return;
+            customEditId = id; setCustomModalMode(); resetCustomForm();
+            document.getElementById('custom-room-name-input').value = room.rawName || '';
+            if (room.themeId) document.getElementById('custom-room-theme-select').value = room.themeId;
+            onCustomThemeChange();
+            customWords = (room.words || []).map(cleanWord).filter(Boolean); renderCustomWords();
+            document.getElementById('create-custom-modal').classList.remove('hidden');
+            if (!room.words) sendWS({ type: 'GET_CUSTOM', roomId: id }); // pede as palavras atuais ao servidor
         }
         function onCustomThemeChange() {
             const outros = document.getElementById('custom-room-theme-select').value === 'outros';
@@ -1895,16 +1940,19 @@
         let createTimer = null;
         function saveCustomRoom() {
             const nameEl = document.getElementById('custom-room-name-input');
-            const wordsEl = document.getElementById('custom-room-words-input');
+            const wordsEl = document.getElementById('custom-word-input');
             const themeId = document.getElementById('custom-room-theme-select').value;
             const name = nameEl.value.trim().slice(0, 30);
-            const words = parseCustomWords(wordsEl.value);
+            const pending = cleanWord(wordsEl.value); if (pending && !customWords.includes(pending)) customWords.push(pending);
+            const words = customWords.slice(0, 300);
             if (!name) { flagField(nameEl); return; }
             if (themeId === 'outros' && !words.length) { flagField(wordsEl); return; }
             if (!isGoogleLoggedIn) { showAlertBanner('Faça login com o Google para criar salas personalizadas.'); return; }
             if (!wsReady) { showAlertBanner('Sem conexão com o servidor. Tentando reconectar...'); return; }
-            sendWS({ type: 'CREATE_CUSTOM', name, themeId, themeName: themeId === 'outros' ? name : undefined, words, gid: googleUser ? googleUser.sub : undefined });
-            nameEl.value = ''; wordsEl.value = '';
+            const payload = { name, themeId, themeName: themeId === 'outros' ? name : undefined, words, gid: googleUser ? googleUser.sub : undefined };
+            if (customEditId) sendWS({ type: 'EDIT_CUSTOM', roomId: customEditId, ...payload });
+            else sendWS({ type: 'CREATE_CUSTOM', ...payload });
+            customEditId = null; resetCustomForm();
             closeCreateCustomModal();
             clearTimeout(createTimer);
             createTimer = setTimeout(() => showAlertBanner('O servidor não respondeu ao criar a sala. Tente novamente.'), 5000);
@@ -1913,6 +1961,7 @@
         onServer = function (m) {
             if (m && ['LOBBY', 'JOINED', 'ROOM', 'ERROR'].includes(m.type)) clearTimeout(createTimer);
             if (m && ['JOINED', 'ROOM', 'ERROR', 'BANNED'].includes(m.type)) clearTimeout(joinTimer);
+            if (m && m.type === 'CUSTOM_DATA' && customEditId === m.roomId && Array.isArray(m.words)) { customWords = m.words.map(cleanWord).filter(Boolean); renderCustomWords(); }
             if (m && m.type === 'ACCOUNT') { applyProfile(m.profile); persistProfile(); }
             _onServerBase(m);
         };
