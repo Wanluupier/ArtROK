@@ -1,16 +1,86 @@
 'use strict';
-// ARTROK — servidor completo (sem dependências). Rode com:  node server.js
+// ARTROK — servidor completo com MongoDB Atlas integrado. Rode com: node server.js
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { words: themeWords, THEME_IDS } = require('./palavras.js');
 
+// Importação opcional do Mongoose/MongoDB se disponível, com fallback seguro para arquivos locais
+let mongoose = null;
+try {
+  mongoose = require('mongoose');
+} catch (e) {
+  // Se não houver mongoose instalado, usa o sistema local de arquivos por segurança
+}
+
 const PORT = process.env.PORT || 3000;
-const DATA = path.join(__dirname, 'data'); fs.mkdirSync(DATA, { recursive: true });
+const MONGO_URI = process.env.MONGO_URI || '';
+const DATA = path.join(__dirname, 'data'); 
+try { fs.mkdirSync(DATA, { recursive: true }); } catch (e) {}
+
 let CONFIG = {}; try { CONFIG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')); } catch (e) {}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || CONFIG.googleClientId || '';
 
 const ROUND_SECONDS = 80, BETWEEN_MS = 4500, MAX_PLAYERS = 10, BAN_MS = 60 * 60 * 1000;   // ban dura 1 hora
 const MAX_FRAME = 12 * 1024 * 1024, MAX_IMG = 7200000;
 const LANGS = ['pt', 'en', 'es'];
+
+// ---------------------------------------------------------------- CONEXÃO MONGODB ATLAS
+let dbConnected = false;
+let AccountModel = null;
+let RoomModel = null;
+let BanModel = null;
+
+async function setupDatabase() {
+  if (!MONGO_URI || !mongoose) {
+    console.log('  (Aviso: Usando armazenamento local em arquivos JSON)\n');
+    return;
+  }
+  try {
+    await mongoose.connect(MONGO_URI, { serverSelectionTimeoutMS: 5000 });
+    dbConnected = true;
+    console.log('  (Sucesso: Conectado ao MongoDB Atlas com sucesso!)\n');
+
+    // Schemas do MongoDB para persistência total
+    AccountModel = mongoose.model('ArtROK_Account', new mongoose.Schema({
+      gid: { type: String, unique: true, required: true },
+      name: String,
+      bio: String,
+      av: Number,
+      img: String
+    }));
+
+    RoomModel = mongoose.model('ArtROK_Room', new mongoose.Schema({
+      roomId: { type: String, unique: true, required: true },
+      name: String,
+      themeId: String,
+      themeName: String,
+      words: [String],
+      lang: String,
+      ownerGid: String,
+      created: Number,
+      disabled: Boolean
+    }));
+
+    BanModel = mongoose.model('ArtROK_Ban', new mongoose.Schema({
+      key: { type: String, unique: true, required: true },
+      until: Number
+    }));
+
+    // Carregar dados salvos do MongoDB para a memória
+    const savedAccs = await AccountModel.find({});
+    savedAccs.forEach(a => { accounts[a.gid] = { name: a.name, bio: a.bio, av: a.av, img: a.img }; });
+
+    const savedBans = await BanModel.find({ until: { $gt: Date.now() } });
+    savedBans.forEach(b => { bans.set(b.key, b.until); });
+
+    const savedRooms = await RoomModel.find({});
+    savedRooms.forEach(c => {
+      mkRoom({ id: c.roomId, kind: 'custom', name: c.name, themeId: c.themeId, themeName: c.themeName, words: c.words, lang: c.lang, ownerGid: c.ownerGid, created: c.created || Date.now(), disabled: !!c.disabled });
+    });
+
+  } catch (err) {
+    console.error('  (Erro ao conectar no MongoDB Atlas, usando fallback local):', err.message);
+  }
+}
 
 // ---------------------------------------------------------------- textos (3 idiomas)
 const MSG = {
@@ -53,7 +123,11 @@ const sameWord = (a, b) => norm(a) === norm(b) || norm(a.replace(ART, '')) === n
 const rnd = n => crypto.randomInt(n);
 const loadJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(DATA, f), 'utf8')); } catch (e) { return d; } };
 const saveTimers = {};
-const saveJSON = (f, obj) => { clearTimeout(saveTimers[f]); saveTimers[f] = setTimeout(() => fs.writeFile(path.join(DATA, f), JSON.stringify(obj), () => {}), 500); };
+const saveJSON = (f, obj) => { 
+  if (dbConnected) return; // Se estiver no Atlas, ignora salvamento em arquivo local
+  clearTimeout(saveTimers[f]); 
+  saveTimers[f] = setTimeout(() => fs.writeFile(path.join(DATA, f), JSON.stringify(obj), () => {}), 500); 
+};
 const safeImg = s => typeof s === 'string' && s.length < MAX_IMG && /^data:image\/(png|jpe?g|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(s);
 
 // ---------------------------------------------------------------- HTTP
@@ -120,8 +194,15 @@ setInterval(() => { for (const p of conns) { if (p.socket.writable) wsSend(p.soc
 // ---------------------------------------------------------------- dados
 const conns = new Set(), byId = new Map();
 const rooms = new Map();           // id -> room
-const bans = new Map(Object.entries(loadJSON('bans.json', {})).filter(([, u]) => u > Date.now()));   // chave -> até quando (salvo em disco; expira sozinho)
-const saveBans = () => saveJSON('bans.json', Object.fromEntries(bans));
+const bans = new Map(Object.entries(loadJSON('bans.json', {})).filter(([, u]) => u > Date.now()));
+const saveBans = async () => {
+  saveJSON('bans.json', Object.fromEntries(bans));
+  if (dbConnected && BanModel) {
+    for (const [k, u] of bans) {
+      await BanModel.updateOne({ key: k }, { until: u }, { upsert: true }).catch(() => {});
+    }
+  }
+};
 setInterval(() => { const now = Date.now(); let ch = false; for (const [k, u] of bans) if (u <= now) { bans.delete(k); ch = true; } if (ch) saveBans(); }, 60 * 1000);
 const accounts = loadJSON('accounts.json', {});
 const savedCustom = loadJSON('rooms.json', []);
@@ -149,10 +230,16 @@ function publicRoom(theme, lang) {
   const id = theme + ':' + lang;
   return rooms.get(id) || mkRoom({ id, kind: 'public', name: theme, themeId: theme, themeName: '', lang, words: themeWords(theme, lang) });
 }
-function persistCustom() {
-  saveJSON('rooms.json', [...rooms.values()].filter(r => r.kind === 'custom').map(r => ({ id: r.id, name: r.name, themeId: r.themeId, themeName: r.themeName, words: r.words, lang: r.lang, ownerGid: r.ownerGid, created: r.created, disabled: !!r.disabled })));
+async function persistCustom() {
+  const customRooms = [...rooms.values()].filter(r => r.kind === 'custom').map(r => ({ roomId: r.id, name: r.name, themeId: r.themeId, themeName: r.themeName, words: r.words, lang: r.lang, ownerGid: r.ownerGid, created: r.created, disabled: !!r.disabled }));
+  saveJSON('rooms.json', customRooms);
+  if (dbConnected && RoomModel) {
+    await RoomModel.deleteMany({});
+    if (customRooms.length > 0) {
+      await RoomModel.insertMany(customRooms).catch(() => {});
+    }
+  }
 }
-for (const c of savedCustom) mkRoom({ id: c.id, kind: 'custom', name: c.name, themeId: c.themeId, themeName: c.themeName, words: c.words, lang: c.lang, ownerGid: c.ownerGid, created: c.created || Date.now(), disabled: !!c.disabled });
 
 function view(room, to) {
   return {
@@ -166,25 +253,22 @@ function view(room, to) {
   };
 }
 const toRoom = (room, fn) => { for (const pl of room.players.values()) fn(pl); };
-// avisa quem está desenhando no modo livre quantas pessoas estão assistindo
-// banimento automático (spam / autodraw): 1 hora, mesmo esquema do ban por votação
+
 function autoBan(room, t, kind) {
-  const until = Date.now() + BAN_MS; bans.set('*|' + t.id, until); if (t.device) bans.set('*|' + t.device, until); saveBans();   // ban GLOBAL (vale em todas as salas)
+  const until = Date.now() + BAN_MS; bans.set('*|' + t.id, until); if (t.device) bans.set('*|' + t.device, until); saveBans();
   const nm = t.shownName; room.votes.delete(t.id);
   t.send({ type: 'BANNED', room: room.kind === 'public' ? room.themeId : room.name, reason: tx(t.lang, kind === 'spam' ? 'banSpam' : 'banAuto'), until });
   leaveRoom(t, true); sysPub(room, kind === 'spam' ? 'bannedSpam' : 'bannedAuto', { n: nm });
 }
-// mais de 10 mensagens em 5 s = spam
 function spamCheck(room, p) {
   const now = Date.now(); p.spamTs = (p.spamTs || []).filter(t => now - t < 5000); p.spamTs.push(now);
   if (p.spamTs.length > 10) { p.spamTs = []; autoBan(room, p, 'spam'); return true; } return false;
 }
-// 50 traços/cliques em 10 s = autodraw (cada traço termina com um SNAPSHOT / FREE_SNAP)
 function strokeCheck(room, p) {
   const now = Date.now(); p.strokeTs = (p.strokeTs || []).filter(t => now - t < 10000); p.strokeTs.push(now);
   if (p.strokeTs.length >= 50) { p.strokeTs = []; autoBan(room, p, 'auto'); return true; } return false;
 }
-const needVotes = room => Math.floor(room.players.size / 2) + 1;   // 2 jogadores=2, 3=2, 4=3, 6=4 ...
+const needVotes = room => Math.floor(room.players.size / 2) + 1;
 function notifyWatchers(room, id) {
   const t = room && room.players.get(id); if (!t) return;
   let n = 0; for (const o of room.players.values()) if (o.freeWatch === id) n++;
@@ -199,7 +283,7 @@ function lobbyFor(p) {
   const list = THEME_IDS.map(t => { const r = rooms.get(t + ':' + p.lang); return { id: t, kind: 'public', name: t, themeId: t, count: r ? r.players.size : 0 }; });
   for (const r of rooms.values()) if (r.kind === 'custom') {
     const mine = !!(p.verified && p.gid && r.ownerGid === p.gid);
-    if (r.disabled && !mine) continue;   // sala desativada fica invisível para os outros
+    if (r.disabled && !mine) continue;
     list.push({ id: r.id, kind: 'custom', name: r.name, themeId: r.themeId, themeName: r.themeName, count: r.players.size, mine, disabled: !!r.disabled });
   }
   return list;
@@ -207,7 +291,6 @@ function lobbyFor(p) {
 function sendLobby(p) { p.send({ type: 'LOBBY', rooms: lobbyFor(p) }); }
 function lobbyAll() { clearTimeout(lobbyTimer); lobbyTimer = setTimeout(() => { for (const p of conns) if (p.id) sendLobby(p); }, 150); }
 
-function roomKey(room) { return room.kind === 'public' ? room.id : room.id; }
 function isBanned(p, room) { const now = Date.now(); for (const k of [p.id, p.device]) { if (!k) continue; for (const pre of [room.id, '*']) { const u = bans.get(pre + '|' + k); if (u && u > now) return u; } } return 0; }
 
 function leaveRoom(p, silent) {
@@ -280,8 +363,8 @@ function nextRound(room) {
   const d = room.players.get(drawer);
   if (d.free) { d.free = false; d.send({ type: 'FREE_BLOCKED' }); for (const o of room.players.values()) if (o.freeWatch === d.id) { o.freeWatch = null; o.send({ type: 'FREE_OFF', from: d.id }); } d.send({ type: 'FREE_WATCHERS', count: 0 }); }
   toRoom(room, pl => pl.send({ type: 'CANVAS_CLEAR' }));
-  broadcastRoom(room);                      // primeiro o estado da sala (o cliente zera a palavra quando o desenhista muda)...
-  d.send({ type: 'WORD', word: room.word }); // ...depois a palavra secreta só para quem desenha
+  broadcastRoom(room);
+  d.send({ type: 'WORD', word: room.word });
   toRoom(room, pl => pl.send({ type: 'TICK', t: room.timeLeft }));
   room.interval = setInterval(() => {
     room.timeLeft--;
@@ -336,7 +419,7 @@ function handleChat(p, room, m) {
   toRoom(room, pl => { if (!p.guessed || pl.guessed || pl.id === room.drawerId) pl.send({ type: 'CHAT', channel: 'guess', text: line }); });
 }
 
-// ---------------------------------------------------------------- Google
+// ---------------------------------------------------------------- Google & Contas
 async function verifyGoogle(p, token, gid) {
   if (!token) return false;
   if (p.verifying && p.verifying.token === token) return p.verifying.promise;
@@ -352,12 +435,26 @@ async function verifyGoogle(p, token, gid) {
   p.verifying = { token, promise }; return promise;
 }
 const snap = p => ({ name: p.name, bio: p.bio, av: p.av, img: p.img });
+
+async function saveAccountToDB(gid, data) {
+  accounts[gid] = data;
+  saveJSON('accounts.json', accounts);
+  if (dbConnected && AccountModel) {
+    await AccountModel.findOneAndUpdate({ gid }, { gid, ...data }, { upsert: true, new: true }).catch(() => {});
+  }
+}
+
 async function googleLogin(p, token, gid) {
   const ok = await verifyGoogle(p, token, gid);
   if (!ok) return;
   const acc = accounts[p.gid];
-  if (acc) { p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av; if (safeImg(acc.img)) setImg(p, acc.img); else if (acc.av != null) setImg(p, null); p.send({ type: 'ACCOUNT', profile: acc }); }
-  else { accounts[p.gid] = snap(p); saveJSON('accounts.json', accounts); }
+  if (acc) { 
+    p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av; 
+    if (safeImg(acc.img)) setImg(p, acc.img); else if (acc.av != null) setImg(p, null); 
+    p.send({ type: 'ACCOUNT', profile: acc }); 
+  } else { 
+    await saveAccountToDB(p.gid, snap(p));
+  }
   const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
   sendLobby(p);
 }
@@ -372,8 +469,8 @@ function onMessage(p, m) {
     p.id = id; byId.set(id, p);
     p.name = clean(m.name, 50); p.bio = clean(m.bio, 50); p.av = Number.isInteger(m.av) && m.av >= 0 && m.av < 5 ? m.av : 4;
     p.device = clean(m.device, 80); if (LANGS.includes(m.lang)) p.lang = m.lang;
-    if (safeImg(m.img)) setImg(p, m.img); else if (!m.hasImg) setImg(p, null);   // hasImg sem img = mantém a foto atual
-    if (p.verified && accounts[p.gid]) { accounts[p.gid] = snap(p); saveJSON('accounts.json', accounts); }
+    if (safeImg(m.img)) setImg(p, m.img); else if (!m.hasImg) setImg(p, null);
+    if (p.verified && accounts[p.gid]) { saveAccountToDB(p.gid, snap(p)); }
     else if (m.gtoken && !p.verified) googleLogin(p, m.gtoken, m.gid);
     const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
     sendLobby(p); return;
@@ -504,15 +601,16 @@ function onClose(p) {
   if (p.id && byId.get(p.id) === p) byId.delete(p.id);
 }
 
-// limpa salas personalizadas vazias há mais de 24h
+// Limpeza de salas vazias
 setInterval(() => {
   let changed = false;
   for (const r of [...rooms.values()]) if (r.kind === 'custom' && !r.disabled && r.players.size === 0 && Date.now() - r.emptySince > 24 * 3600 * 1000) { rooms.delete(r.id); changed = true; }
   if (changed) { persistCustom(); lobbyAll(); }
 }, 3600 * 1000);
 
-server.listen(PORT, () => {
-  console.log('\n  ARTROK rodando!  Abra no navegador:  http://localhost:' + PORT + '\n');
+// Iniciar servidor HTTP e conexão com Banco de Dados
+server.listen(PORT, async () => {
+  console.log('\n  ARTROK rodando! Abra no navegador: http://localhost:' + PORT + '\n');
   if (!htmlPath) console.log('  ATENÇÃO: coloque o artrok.html na mesma pasta do server.js\n');
-  if (!GOOGLE_CLIENT_ID) console.log('  (Login com Google desligado: falta o googleClientId no config.json)\n');
+  await setupDatabase();
 });
