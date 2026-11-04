@@ -38,6 +38,9 @@ const MSG = {
   banVote: { pt: '{n} votou para banir {t} ({c}/{r}).', en: '{n} voted to ban {t} ({c}/{r}).', es: '{n} votó para banear a {t} ({c}/{r}).' },
   reportVote: { pt: '{n} denunciou o desenho de {d} ({c}/{r}).', en: '{n} reported {d}\'s drawing ({c}/{r}).', es: '{n} denunció el dibujo de {d} ({c}/{r}).' },
   reportDrop: { pt: 'O desenho de {d} foi derrubado por denúncia. Passando a vez!', en: '{d}\'s drawing was taken down by reports. Next turn!', es: 'El dibujo de {d} cayó por denuncias. ¡Siguiente turno!' },
+  notOwner: { pt: 'Só o dono da sala pode fazer isso.', en: 'Only the room owner can do that.', es: 'Solo el dueño de la sala puede hacer eso.' },
+  roomDeleted: { pt: 'A sala foi apagada pelo dono.', en: 'The room was deleted by its owner.', es: 'La sala fue eliminada por su dueño.' },
+  roomDisabled: { pt: 'A sala foi desativada pelo dono.', en: 'The room was disabled by its owner.', es: 'La sala fue desactivada por su dueño.' },
   anon: { pt: 'Anônimo', en: 'Anonymous', es: 'Anónimo' },
 };
 const tx = (lang, key, v) => ((MSG[key][lang] || MSG[key].pt)).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] !== undefined ? v[k] : ''));
@@ -147,9 +150,9 @@ function publicRoom(theme, lang) {
   return rooms.get(id) || mkRoom({ id, kind: 'public', name: theme, themeId: theme, themeName: '', lang, words: themeWords(theme, lang) });
 }
 function persistCustom() {
-  saveJSON('rooms.json', [...rooms.values()].filter(r => r.kind === 'custom').map(r => ({ id: r.id, name: r.name, themeId: r.themeId, themeName: r.themeName, words: r.words, lang: r.lang, ownerGid: r.ownerGid, created: r.created })));
+  saveJSON('rooms.json', [...rooms.values()].filter(r => r.kind === 'custom').map(r => ({ id: r.id, name: r.name, themeId: r.themeId, themeName: r.themeName, words: r.words, lang: r.lang, ownerGid: r.ownerGid, created: r.created, disabled: !!r.disabled })));
 }
-for (const c of savedCustom) mkRoom({ id: c.id, kind: 'custom', name: c.name, themeId: c.themeId, themeName: c.themeName, words: c.words, lang: c.lang, ownerGid: c.ownerGid, created: c.created || Date.now() });
+for (const c of savedCustom) mkRoom({ id: c.id, kind: 'custom', name: c.name, themeId: c.themeId, themeName: c.themeName, words: c.words, lang: c.lang, ownerGid: c.ownerGid, created: c.created || Date.now(), disabled: !!c.disabled });
 
 function view(room, to) {
   return {
@@ -194,7 +197,11 @@ const sys = (room, key, v) => toRoom(room, pl => pl.send({ type: 'CHAT', channel
 let lobbyTimer = null;
 function lobbyFor(p) {
   const list = THEME_IDS.map(t => { const r = rooms.get(t + ':' + p.lang); return { id: t, kind: 'public', name: t, themeId: t, count: r ? r.players.size : 0 }; });
-  for (const r of rooms.values()) if (r.kind === 'custom') list.push({ id: r.id, kind: 'custom', name: r.name, themeId: r.themeId, themeName: r.themeName, count: r.players.size, mine: !!(p.gid && r.ownerGid === p.gid) });
+  for (const r of rooms.values()) if (r.kind === 'custom') {
+    const mine = !!(p.verified && p.gid && r.ownerGid === p.gid);
+    if (r.disabled && !mine) continue;   // sala desativada fica invisível para os outros
+    list.push({ id: r.id, kind: 'custom', name: r.name, themeId: r.themeId, themeName: r.themeName, count: r.players.size, mine, disabled: !!r.disabled });
+  }
   return list;
 }
 function sendLobby(p) { p.send({ type: 'LOBBY', rooms: lobbyFor(p) }); }
@@ -220,6 +227,11 @@ function leaveRoom(p, silent) {
     else { room.votes.forEach(v => v.delete(p.id)); broadcastRoom(room); }
   }
   lobbyAll();
+}
+
+const ownsRoom = (p, r) => !!(r && r.kind === 'custom' && p.verified && p.gid && r.ownerGid === p.gid);
+function kickAll(room, key) {
+  for (const pl of [...room.players.values()]) { pl.send({ type: 'ROOM_CLOSED', msg: tx(pl.lang, key) }); leaveRoom(pl, true); }
 }
 
 function joinRoom(p, room) {
@@ -376,6 +388,7 @@ function onMessage(p, m) {
       const id = String(m.roomId || '');
       const r = THEME_IDS.includes(id) ? publicRoom(id, p.lang) : rooms.get(id);
       if (!r || r.kind === 'private') return p.err('notFound');
+      if (r.kind === 'custom' && r.disabled && !ownsRoom(p, r)) return p.err('notFound');
       joinRoom(p, r); break;
     }
     case 'JOIN_CODE': {
@@ -406,6 +419,26 @@ function onMessage(p, m) {
       const theme = THEME_IDS.includes(themeId) ? themeId : 'outros';
       const r = mkRoom({ id: 'c_' + crypto.randomBytes(4).toString('hex'), kind: 'custom', name, themeId: theme, themeName: theme === 'outros' ? name : '', words: list, lang: p.lang, ownerGid: p.gid, created: Date.now() });
       persistCustom(); joinRoom(p, r); lobbyAll(); break;
+    }
+    case 'GET_CUSTOM': { const r = rooms.get(String(m.roomId || '')); if (!ownsRoom(p, r)) return p.err('notOwner'); p.send({ type: 'CUSTOM_DATA', roomId: r.id, words: r.words }); break; }
+    case 'EDIT_CUSTOM': {
+      const r = rooms.get(String(m.roomId || '')); if (!ownsRoom(p, r)) return p.err('notOwner');
+      const name = clean(m.name, 30); if (!name) return p.err('badName');
+      const themeId = String(m.themeId || 'outros');
+      let list = Array.isArray(m.words) ? [...new Set(m.words.map(w => clean(w, 15)).filter(Boolean))].slice(0, 300) : [];
+      if (!list.length) { if (themeId === 'outros' || !THEME_IDS.includes(themeId)) return p.err('needWords'); list = themeWords(themeId, r.lang); }
+      const theme = THEME_IDS.includes(themeId) ? themeId : 'outros';
+      r.name = name; r.themeId = theme; r.themeName = theme === 'outros' ? name : ''; r.words = list; r.recent = [];
+      persistCustom(); broadcastRoom(r); lobbyAll(); break;
+    }
+    case 'DELETE_CUSTOM': {
+      const r = rooms.get(String(m.roomId || '')); if (!ownsRoom(p, r)) return p.err('notOwner');
+      kickAll(r, 'roomDeleted'); rooms.delete(r.id); persistCustom(); lobbyAll(); break;
+    }
+    case 'TOGGLE_CUSTOM': {
+      const r = rooms.get(String(m.roomId || '')); if (!ownsRoom(p, r)) return p.err('notOwner');
+      r.disabled = !!m.disabled; if (r.disabled) kickAll(r, 'roomDisabled');
+      persistCustom(); lobbyAll(); break;
     }
     case 'LEAVE': leaveRoom(p); break;
     case 'CHAT': if (room) handleChat(p, room, m); break;
@@ -474,7 +507,7 @@ function onClose(p) {
 // limpa salas personalizadas vazias há mais de 24h
 setInterval(() => {
   let changed = false;
-  for (const r of [...rooms.values()]) if (r.kind === 'custom' && r.players.size === 0 && Date.now() - r.emptySince > 24 * 3600 * 1000) { rooms.delete(r.id); changed = true; }
+  for (const r of [...rooms.values()]) if (r.kind === 'custom' && !r.disabled && r.players.size === 0 && Date.now() - r.emptySince > 24 * 3600 * 1000) { rooms.delete(r.id); changed = true; }
   if (changed) { persistCustom(); lobbyAll(); }
 }, 3600 * 1000);
 
