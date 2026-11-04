@@ -86,6 +86,7 @@ async function setupDatabase() {
 
 // ---------------------------------------------------------------- textos (3 idiomas)
 const MSG = {
+  alreadyPlaying: { pt: 'Você já está jogando em outra aba ou dispositivo.', en: 'You are already playing in another tab or device.', es: 'Ya estás jugando en otra pestaña o dispositivo.' },
   roomFull: { pt: 'Sala cheia.', en: 'Room is full.', es: 'Sala llena.' },
   notFound: { pt: 'Sala não encontrada.', en: 'Room not found.', es: 'Sala no encontrada.' },
   needGoogle: { pt: 'Faça login com o Google para criar salas personalizadas.', en: 'Sign in with Google to create custom rooms.', es: 'Inicia sesión con Google para crear salas personalizadas.' },
@@ -329,6 +330,12 @@ function joinRoom(p, room) {
   const until = isBanned(p, room);
   if (until) { p.send({ type: 'BANNED', room: room.kind === 'public' ? room.themeId : room.name, reason: tx(p.lang, 'banReason'), until }); return; }
   if (room.players.size >= MAX_PLAYERS) return p.err('roomFull');
+  // Mesma conta Google já está em sala em outro dispositivo/aba? Bloqueia.
+  if (p.verified && p.gid) {
+    for (const o of conns) {
+      if (o !== p && o.verified && o.gid === p.gid && o.roomId && rooms.has(o.roomId) && o.socket && !o.socket.destroyed) return p.err('alreadyPlaying');
+    }
+  }
   leaveRoom(p);
   room.players.set(p.id, p); room.order.push(p.id); p.roomId = room.id; p.score = 0; p.guessed = false; p.free = false; p.freeWatch = null;
   p.sentImg = {};
