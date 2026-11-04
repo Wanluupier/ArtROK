@@ -1,5 +1,5 @@
 'use strict';
-// ARTROK — servidor completo com MongoDB Atlas integrado. Rode com: node server.js
+// ARTROK — servidor completo com MongoDB Atlas integrado e limpeza automática de 10 dias. Rode com: node server.js
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { words: themeWords, THEME_IDS } = require('./palavras.js');
 
@@ -43,7 +43,8 @@ async function setupDatabase() {
       name: String,
       bio: String,
       av: Number,
-      img: String
+      img: String,
+      updatedAt: { type: Number, default: Date.now }
     }));
 
     RoomModel = mongoose.model('ArtROK_Room', new mongoose.Schema({
@@ -74,6 +75,13 @@ async function setupDatabase() {
     savedRooms.forEach(c => {
       mkRoom({ id: c.roomId, kind: 'custom', name: c.name, themeId: c.themeId, themeName: c.themeName, words: c.words, lang: c.lang, ownerGid: c.ownerGid, created: c.created || Date.now(), disabled: !!c.disabled });
     });
+
+    // Limpeza automática de contas inativas há mais de 10 dias
+    const tenDaysAgo = Date.now() - (10 * 24 * 3600 * 1000);
+    const deleteResult = await AccountModel.deleteMany({ updatedAt: { $lt: tenDaysAgo } });
+    if (deleteResult.deletedCount > 0) {
+      console.log(`  (Limpeza: ${deleteResult.deletedCount} contas inativas há mais de 10 dias foram removidas para poupar espaço)\n`);
+    }
 
   } catch (err) {
     console.error('  (Erro ao conectar no MongoDB Atlas, usando fallback local):', err.message);
@@ -436,7 +444,7 @@ async function verifyGoogle(p, token, gid) {
   })();
   p.verifying = { token, promise }; return promise;
 }
-const snap = p => ({ name: p.name, bio: p.bio, av: p.av, img: p.img });
+const snap = p => ({ name: p.name, bio: p.bio, av: p.av, img: p.img, updatedAt: Date.now() });
 
 async function saveAccountToDB(gid, data) {
   accounts[gid] = data;
@@ -456,6 +464,7 @@ async function googleLogin(p, token, gid) {
     p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av; 
     if (safeImg(acc.img)) setImg(p, acc.img); else if (acc.av != null) setImg(p, null); 
     p.send({ type: 'ACCOUNT', profile: acc }); 
+    saveAccountToDB(p.gid, snap(p)); // Atualiza o timestamp de atividade
   } else { 
     await saveAccountToDB(p.gid, snap(p));
   }
