@@ -1780,6 +1780,7 @@
         let sfxMuted = ls('artrok_sfxm') === '1', musicMuted = ls('artrok_musicm') === '1', tracks = MUSIC_TRACKS, tIdx = 0;
         let sfxVol = lsNum('artrok_sfxvol', 1), musicVol = lsNum('artrok_musicvol', 0.5);
         const audio = new Audio(); audio.volume = musicVol; audio.muted = musicMuted;
+        let musicLoop = ls('artrok_musicloop') === '1'; audio.loop = musicLoop;   // 🔁 repete a mesma música sem avançar
         function playTrack(i) { if (!tracks.length) return; tIdx = (i + tracks.length) % tracks.length; audio.src = tracks[tIdx].url; audio.play().catch(() => {}); renderMusic(); }
         let musicErrors = 0;
         audio.onended = () => { musicErrors = 0; playTrack(tIdx + 1); };
@@ -1823,7 +1824,7 @@
             panel.innerHTML = '';
             const row = cls => { const d = document.createElement('div'); d.className = 'flex items-center gap-2 ' + (cls || ''); panel.appendChild(d); return d; };
             const title = row('text-xs font-bold text-brand-yellow'); title.textContent = '🎵 ' + tr('Música') + ' ' + (tIdx + 1);
-            row('justify-center').append(pbtn('⏮', () => playTrack(tIdx - 1)), pbtn(audio.paused ? '▶' : '⏸', () => { musicStarted = true; if (!audio.src) { ls('artrok_autoplay', '1'); playTrack(tIdx); } else if (audio.paused) { ls('artrok_autoplay', '1'); audio.play().catch(() => {}); } else { ls('artrok_autoplay', '0'); audio.pause(); } }), pbtn('⏭', () => playTrack(tIdx + 1)));
+            row('justify-center').append(pbtn('⏮', () => playTrack(tIdx - 1)), pbtn(audio.paused ? '▶' : '⏸', () => { musicStarted = true; if (!audio.src) { ls('artrok_autoplay', '1'); playTrack(tIdx); } else if (audio.paused) { ls('artrok_autoplay', '1'); audio.play().catch(() => {}); } else { ls('artrok_autoplay', '0'); audio.pause(); } }), pbtn('⏭', () => playTrack(tIdx + 1)), pbtn('🔁', () => { musicLoop = !musicLoop; audio.loop = musicLoop; ls('artrok_musicloop', musicLoop ? '1' : '0'); renderMusic(); }, musicLoop));
             const list = document.createElement('div'); list.className = 'max-h-48 overflow-y-auto space-y-1';
             tracks.forEach((t, i) => { const b = pbtn(tr('Música') + ' ' + (i + 1), () => playTrack(i), i === tIdx); b.className += ' w-full text-left truncate'; list.appendChild(b); });
             panel.appendChild(list);
