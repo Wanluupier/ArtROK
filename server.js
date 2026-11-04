@@ -472,11 +472,13 @@ function setImg(p, img) { p.img = img || null; p.imgRev = img ? crypto.createHas
 // ---------------------------------------------------------------- mensagens
 function onMessage(p, m) {
   if (m.type === 'PROFILE') {
-    // Se o jogador estiver logado pelo Google, priorizamos o GID do Google como ID principal para unificar PC e Telemóvel
     let requestedId = String(m.id || '');
+    
+    // Se já estiver verificado com o Google, forçamos o ID a ser 'g_' + gid em qualquer dispositivo
     if (p.verified && p.gid) {
       requestedId = 'g_' + p.gid; 
     }
+    
     const id = requestedId.match(/^[\w-]{1,64}$/) ? requestedId : null; if (!id) return;
     
     if (p.id && p.id !== id) { leaveRoom(p, true); byId.delete(p.id); }
@@ -525,7 +527,15 @@ function onMessage(p, m) {
             p.id = newGoogleId;
             byId.set(newGoogleId, p);
           }
+          const acc = accounts[p.gid];
+          if (acc) {
+            p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av;
+            if (safeImg(acc.img)) setImg(p, acc.img);
+            p.send({ type: 'ACCOUNT', profile: acc });
+          }
         }
+        const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
+        sendLobby(p);
       });
       break;
     case 'GOOGLE_LOGOUT': p.verified = false; p.gid = null; p.verifying = null; break;
