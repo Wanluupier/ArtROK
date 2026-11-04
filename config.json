@@ -1,9 +1,3 @@
 {
-  "name": "artrok",
-  "version": "1.0.0",
-  "description": "Jogo estilo Gartic",
-  "main": "server.js",
-  "dependencies": {
-    "mongoose": "^8.0.0"
-  }
+  "googleClientId": "143135176952-e1c3goi5mnjcisk6urft5u0au7j6hdnp.apps.googleusercontent.com"
 }
