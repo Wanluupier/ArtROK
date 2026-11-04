@@ -3,12 +3,11 @@
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { words: themeWords, THEME_IDS } = require('./palavras.js');
 
-// Importação opcional do Mongoose/MongoDB se disponível, com fallback seguro para arquivos locais
 let mongoose = null;
 try {
   mongoose = require('mongoose');
 } catch (e) {
-  // Se não houver mongoose instalado, usa o sistema local de arquivos por segurança
+  // Fallback seguro
 }
 
 const PORT = process.env.PORT || 3000;
@@ -19,7 +18,7 @@ try { fs.mkdirSync(DATA, { recursive: true }); } catch (e) {}
 let CONFIG = {}; try { CONFIG = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')); } catch (e) {}
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || CONFIG.googleClientId || '';
 
-const ROUND_SECONDS = 80, BETWEEN_MS = 4500, MAX_PLAYERS = 10, BAN_MS = 60 * 60 * 1000;   // ban dura 1 hora
+const ROUND_SECONDS = 80, BETWEEN_MS = 4500, MAX_PLAYERS = 10, BAN_MS = 60 * 60 * 1000;
 const MAX_FRAME = 12 * 1024 * 1024, MAX_IMG = 7200000;
 const LANGS = ['pt', 'en', 'es'];
 
@@ -39,7 +38,6 @@ async function setupDatabase() {
     dbConnected = true;
     console.log('  (Sucesso: Conectado ao MongoDB Atlas com sucesso!)\n');
 
-    // Schemas do MongoDB para persistência total
     AccountModel = mongoose.model('ArtROK_Account', new mongoose.Schema({
       gid: { type: String, unique: true, required: true },
       name: String,
@@ -65,7 +63,7 @@ async function setupDatabase() {
       until: Number
     }));
 
-    // Carregar dados salvos do MongoDB para a memória
+    // Carregar dados salvos do MongoDB para a memória ao iniciar
     const savedAccs = await AccountModel.find({});
     savedAccs.forEach(a => { accounts[a.gid] = { name: a.name, bio: a.bio, av: a.av, img: a.img }; });
 
@@ -121,10 +119,8 @@ const norm = s => { const x = String(s).normalize('NFD').replace(/[\u0300-\u036f
 const ART = /^(the|a|an|o|os|as|um|uma|el|la|los|las|un|una)\s+/i;
 const sameWord = (a, b) => norm(a) === norm(b) || norm(a.replace(ART, '')) === norm(b.replace(ART, ''));
 const rnd = n => crypto.randomInt(n);
-const loadJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(DATA, f), 'utf8')); } catch (e) { return d; } };
 const saveTimers = {};
 const saveJSON = (f, obj) => { 
-  if (dbConnected) return; // Se estiver no Atlas, ignora salvamento em arquivo local
   clearTimeout(saveTimers[f]); 
   saveTimers[f] = setTimeout(() => fs.writeFile(path.join(DATA, f), JSON.stringify(obj), () => {}), 500); 
 };
@@ -147,7 +143,7 @@ const server = http.createServer((req, res) => {
   res.writeHead(404); res.end('not found');
 });
 
-// ---------------------------------------------------------------- WebSocket (RFC 6455, mínimo)
+// ---------------------------------------------------------------- WebSocket
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 function wsSend(sock, str, op = 0x1) {
   if (!sock.writable) return;
@@ -193,19 +189,22 @@ setInterval(() => { for (const p of conns) { if (p.socket.writable) wsSend(p.soc
 
 // ---------------------------------------------------------------- dados
 const conns = new Set(), byId = new Map();
-const rooms = new Map();           // id -> room
-const bans = new Map(Object.entries(loadJSON('bans.json', {})).filter(([, u]) => u > Date.now()));
-const saveBans = async () => {
+const rooms = new Map();
+const bans = new Map();
+const accounts = {};
+
+async function saveBans() {
   saveJSON('bans.json', Object.fromEntries(bans));
   if (dbConnected && BanModel) {
-    for (const [k, u] of bans) {
-      await BanModel.updateOne({ key: k }, { until: u }, { upsert: true }).catch(() => {});
-    }
+    try {
+      await BanModel.deleteMany({});
+      const banEntries = [...bans.entries()].map(([k, u]) => ({ key: k, until: u }));
+      if (banEntries.length > 0) await BanModel.insertMany(banEntries);
+    } catch (e) {}
   }
-};
+}
+
 setInterval(() => { const now = Date.now(); let ch = false; for (const [k, u] of bans) if (u <= now) { bans.delete(k); ch = true; } if (ch) saveBans(); }, 60 * 1000);
-const accounts = loadJSON('accounts.json', {});
-const savedCustom = loadJSON('rooms.json', []);
 
 class Player {
   constructor(socket) {
@@ -230,14 +229,17 @@ function publicRoom(theme, lang) {
   const id = theme + ':' + lang;
   return rooms.get(id) || mkRoom({ id, kind: 'public', name: theme, themeId: theme, themeName: '', lang, words: themeWords(theme, lang) });
 }
+
 async function persistCustom() {
   const customRooms = [...rooms.values()].filter(r => r.kind === 'custom').map(r => ({ roomId: r.id, name: r.name, themeId: r.themeId, themeName: r.themeName, words: r.words, lang: r.lang, ownerGid: r.ownerGid, created: r.created, disabled: !!r.disabled }));
   saveJSON('rooms.json', customRooms);
   if (dbConnected && RoomModel) {
-    await RoomModel.deleteMany({});
-    if (customRooms.length > 0) {
-      await RoomModel.insertMany(customRooms).catch(() => {});
-    }
+    try {
+      await RoomModel.deleteMany({});
+      if (customRooms.length > 0) {
+        await RoomModel.insertMany(customRooms);
+      }
+    } catch (e) {}
   }
 }
 
@@ -440,7 +442,9 @@ async function saveAccountToDB(gid, data) {
   accounts[gid] = data;
   saveJSON('accounts.json', accounts);
   if (dbConnected && AccountModel) {
-    await AccountModel.findOneAndUpdate({ gid }, { gid, ...data }, { upsert: true, new: true }).catch(() => {});
+    try {
+      await AccountModel.findOneAndUpdate({ gid }, { gid, ...data }, { upsert: true, new: true });
+    } catch (e) {}
   }
 }
 
@@ -601,14 +605,12 @@ function onClose(p) {
   if (p.id && byId.get(p.id) === p) byId.delete(p.id);
 }
 
-// Limpeza de salas vazias
 setInterval(() => {
   let changed = false;
   for (const r of [...rooms.values()]) if (r.kind === 'custom' && !r.disabled && r.players.size === 0 && Date.now() - r.emptySince > 24 * 3600 * 1000) { rooms.delete(r.id); changed = true; }
   if (changed) { persistCustom(); lobbyAll(); }
 }, 3600 * 1000);
 
-// Iniciar servidor HTTP e conexão com Banco de Dados
 server.listen(PORT, async () => {
   console.log('\n  ARTROK rodando! Abra no navegador: http://localhost:' + PORT + '\n');
   if (!htmlPath) console.log('  ATENÇÃO: coloque o artrok.html na mesma pasta do server.js\n');
