@@ -1,14 +1,12 @@
 'use strict';
-// ARTROK — servidor completo com MongoDB Atlas integrado e limpeza automática de 10 dias. Rode com: node server.js
+// ARTROK — servidor completo com MongoDB Atlas (Identificação unificada por Google e Salas Persistentes)
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { words: themeWords, THEME_IDS } = require('./palavras.js');
 
 let mongoose = null;
 try {
   mongoose = require('mongoose');
-} catch (e) {
-  // Fallback seguro
-}
+} catch (e) {}
 
 const PORT = process.env.PORT || 3000;
 const MONGO_URI = process.env.MONGO_URI || '';
@@ -64,13 +62,14 @@ async function setupDatabase() {
       until: Number
     }));
 
-    // Carregar dados salvos do MongoDB para a memória ao iniciar
+    // Carregar contas do MongoDB
     const savedAccs = await AccountModel.find({});
     savedAccs.forEach(a => { accounts[a.gid] = { name: a.name, bio: a.bio, av: a.av, img: a.img }; });
 
     const savedBans = await BanModel.find({ until: { $gt: Date.now() } });
     savedBans.forEach(b => { bans.set(b.key, b.until); });
 
+    // Carregar salas do MongoDB
     const savedRooms = await RoomModel.find({});
     savedRooms.forEach(c => {
       mkRoom({ id: c.roomId, kind: 'custom', name: c.name, themeId: c.themeId, themeName: c.themeName, words: c.words, lang: c.lang, ownerGid: c.ownerGid, created: c.created || Date.now(), disabled: !!c.disabled });
@@ -78,13 +77,10 @@ async function setupDatabase() {
 
     // Limpeza automática de contas inativas há mais de 10 dias
     const tenDaysAgo = Date.now() - (10 * 24 * 3600 * 1000);
-    const deleteResult = await AccountModel.deleteMany({ updatedAt: { $lt: tenDaysAgo } });
-    if (deleteResult.deletedCount > 0) {
-      console.log(`  (Limpeza: ${deleteResult.deletedCount} contas inativas há mais de 10 dias foram removidas para poupar espaço)\n`);
-    }
+    await AccountModel.deleteMany({ updatedAt: { $lt: tenDaysAgo } });
 
   } catch (err) {
-    console.error('  (Erro ao conectar no MongoDB Atlas, usando fallback local):', err.message);
+    console.error('  (Erro ao conectar no MongoDB Atlas):', err.message);
   }
 }
 
@@ -301,7 +297,7 @@ function lobbyFor(p) {
 function sendLobby(p) { p.send({ type: 'LOBBY', rooms: lobbyFor(p) }); }
 function lobbyAll() { clearTimeout(lobbyTimer); lobbyTimer = setTimeout(() => { for (const p of conns) if (p.id) sendLobby(p); }, 150); }
 
-function isBanned(p, room) { const now = Date.now(); for (const k of [p.id, p.device]) { if (!k) continue; for (const pre of [room.id, '*']) { const u = bans.get(pre + '|' + k); if (u && u > now) return u; } } return 0; }
+function isBanned(p, room) { const now = Date.now(); for (const k of [p.id, p.device, p.gid]) { if (!k) continue; for (const pre of [room.id, '*']) { const u = bans.get(pre + '|' + k); if (u && u > now) return u; } } return 0; }
 
 function leaveRoom(p, silent) {
   const room = p.roomId && rooms.get(p.roomId); if (!room) { p.roomId = null; return; }
@@ -464,7 +460,7 @@ async function googleLogin(p, token, gid) {
     p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av; 
     if (safeImg(acc.img)) setImg(p, acc.img); else if (acc.av != null) setImg(p, null); 
     p.send({ type: 'ACCOUNT', profile: acc }); 
-    saveAccountToDB(p.gid, snap(p)); // Atualiza o timestamp de atividade
+    saveAccountToDB(p.gid, snap(p));
   } else { 
     await saveAccountToDB(p.gid, snap(p));
   }
@@ -476,22 +472,62 @@ function setImg(p, img) { p.img = img || null; p.imgRev = img ? crypto.createHas
 // ---------------------------------------------------------------- mensagens
 function onMessage(p, m) {
   if (m.type === 'PROFILE') {
-    const id = String(m.id || '').match(/^[\w-]{1,64}$/) ? String(m.id) : null; if (!id) return;
+    // Se o jogador estiver logado pelo Google, priorizamos o GID do Google como ID principal para unificar PC e Telemóvel
+    let requestedId = String(m.id || '');
+    if (p.verified && p.gid) {
+      requestedId = 'g_' + p.gid; 
+    }
+    const id = requestedId.match(/^[\w-]{1,64}$/) ? requestedId : null; if (!id) return;
+    
     if (p.id && p.id !== id) { leaveRoom(p, true); byId.delete(p.id); }
     const old = byId.get(id); if (old && old !== p) { leaveRoom(old, true); try { old.socket.destroy(); } catch (e) {} conns.delete(old); }
     p.id = id; byId.set(id, p);
+    
     p.name = clean(m.name, 50); p.bio = clean(m.bio, 50); p.av = Number.isInteger(m.av) && m.av >= 0 && m.av < 5 ? m.av : 4;
     p.device = clean(m.device, 80); if (LANGS.includes(m.lang)) p.lang = m.lang;
     if (safeImg(m.img)) setImg(p, m.img); else if (!m.hasImg) setImg(p, null);
+
+    if (m.gtoken && !p.verified) {
+      googleLogin(p, m.gtoken, m.gid).then(() => {
+        if (p.verified && p.gid) {
+          const newGoogleId = 'g_' + p.gid;
+          if (p.id !== newGoogleId) {
+            byId.delete(p.id);
+            p.id = newGoogleId;
+            byId.set(newGoogleId, p);
+          }
+          const acc = accounts[p.gid];
+          if (acc) {
+            p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av;
+            if (safeImg(acc.img)) setImg(p, acc.img);
+            p.send({ type: 'ACCOUNT', profile: acc });
+          }
+        }
+        const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
+        sendLobby(p);
+      });
+      return;
+    }
+
     if (p.verified && accounts[p.gid]) { saveAccountToDB(p.gid, snap(p)); }
-    else if (m.gtoken && !p.verified) googleLogin(p, m.gtoken, m.gid);
     const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
     sendLobby(p); return;
   }
   if (!p.id) return;
   const room = p.roomId ? rooms.get(p.roomId) : null;
   switch (m.type) {
-    case 'GOOGLE_LOGIN': googleLogin(p, m.token, m.gid); break;
+    case 'GOOGLE_LOGIN': 
+      googleLogin(p, m.token, m.gid).then(() => {
+        if (p.verified && p.gid) {
+          const newGoogleId = 'g_' + p.gid;
+          if (p.id !== newGoogleId) {
+            byId.delete(p.id);
+            p.id = newGoogleId;
+            byId.set(newGoogleId, p);
+          }
+        }
+      });
+      break;
     case 'GOOGLE_LOGOUT': p.verified = false; p.gid = null; p.verifying = null; break;
     case 'JOIN': {
       if (LANGS.includes(m.lang)) p.lang = m.lang;
