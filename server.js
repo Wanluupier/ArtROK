@@ -671,8 +671,9 @@ function onMessage(p, m) {
       const used = new Set([...rooms.values()].filter(x => x.kind === 'private').map(x => x.code));
       let code = 0; for (let i = 0; i < 60 && !code; i++) { const c = 100 + rnd(900); if (!used.has(c)) code = c; }
       if (!code) return p.err('noCodes');
-      const pool = ['alimentos', 'gerais', 'animais', 'verbos', 'bandeiras'].flatMap(t => themeWords(t, p.lang));
-      const r = mkRoom({ id: 'p_' + code + '_' + Date.now().toString(36), kind: 'private', name: 'Sala #' + code, themeId: 'gerais', themeName: '#' + code, code, lang: p.lang, words: pool });
+      const pickedTheme = (THEME_IDS.includes(m.themeId) && m.themeId !== 'outros') ? m.themeId : null;
+      const pool = pickedTheme ? themeWords(pickedTheme, p.lang) : ['alimentos', 'gerais', 'animais', 'verbos', 'bandeiras'].flatMap(t => themeWords(t, p.lang));
+      const r = mkRoom({ id: 'p_' + code + '_' + Date.now().toString(36), kind: 'private', name: 'Sala #' + code, themeId: pickedTheme || 'gerais', themeName: '#' + code, code, lang: p.lang, words: pool });
       joinRoom(p, r); break;
     }
     case 'CREATE_CUSTOM': {
