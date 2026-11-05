@@ -1857,7 +1857,7 @@
             panel.innerHTML = '';
             const row = cls => { const d = document.createElement('div'); d.className = 'flex items-center gap-2 ' + (cls || ''); panel.appendChild(d); return d; };
             const title = row('text-xs font-bold text-brand-yellow'); title.textContent = '🎵 ' + tr('Música') + ' ' + (tIdx + 1);
-            row('justify-center').append(pbtn('⏮', () => playTrack(tIdx - 1)), pbtn(audio.paused ? '▶' : '⏸', () => { musicStarted = true; if (!audio.src) { ls('artrok_autoplay', '1'); playTrack(tIdx); } else if (audio.paused) { ls('artrok_autoplay', '1'); audio.play().catch(() => {}); } else { ls('artrok_autoplay', '0'); audio.pause(); } }), pbtn('⏭', () => playTrack(tIdx + 1)), pbtn('🔁', () => { musicLoop = !musicLoop; audio.loop = musicLoop; ls('artrok_musicloop', musicLoop ? '1' : '0'); renderMusic(); }, musicLoop));
+            row('justify-center').append(pbtn('⏮', () => playTrack(tIdx - 1)), pbtn(audio.paused ? '▶' : '⏸', () => { musicStarted = true; if (!audio.src) { setMusicPref('1'); playTrack(tIdx); } else if (audio.paused) { setMusicPref('1'); audio.play().catch(() => {}); } else { setMusicPref('0'); audio.pause(); } }), pbtn('⏭', () => playTrack(tIdx + 1)), pbtn('🔁', () => { musicLoop = !musicLoop; audio.loop = musicLoop; ls('artrok_musicloop', musicLoop ? '1' : '0'); renderMusic(); }, musicLoop));
             const list = document.createElement('div'); list.className = 'max-h-48 overflow-y-auto space-y-1';
             tracks.forEach((t, i) => { const b = pbtn(tr('Música') + ' ' + (i + 1), () => playTrack(i), i === tIdx); b.className += ' w-full text-left truncate'; list.appendChild(b); });
             panel.appendChild(list);
@@ -1865,7 +1865,12 @@
         renderMusic(); renderSound();
         // começa a tocar no primeiro toque/clique (navegadores bloqueiam som automático antes disso)
         let musicStarted = false;
-        function tryAutoMusic() { if (musicStarted) return; musicStarted = true; if (ls('artrok_autoplay') === '0') return; playTrack(0); }
+        // Preferência de música guardada POR CONTA Google. Anônimo nunca começa tocando e não salva nada.
+        function musicPrefKey() { return (typeof googleUser !== 'undefined' && googleUser && googleUser.sub) ? 'artrok_autoplay_' + googleUser.sub : null; }
+        function getMusicPref() { const k = musicPrefKey(); return k ? ls(k) : null; }
+        function setMusicPref(v) { const k = musicPrefKey(); if (k) ls(k, v); }
+        function applyMusicPref() { if (getMusicPref() !== '1' || !audio.paused) return; musicStarted = true; if (!audio.src) playTrack(0); else audio.play().catch(() => {}); }
+        function tryAutoMusic() { if (musicStarted) return; musicStarted = true; if (getMusicPref() !== '1') return; playTrack(0); }
         ['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, tryAutoMusic, { once: true }));
 
         // =====================================================================
@@ -1917,6 +1922,7 @@
                     const nd = document.getElementById('nav-username'); if (nd) nd.textContent = currentUser.name;
                 }
                 persistProfile(); setGoogleButton();
+                applyMusicPref();
                 beginAccountSync();
                 sendWS({ type: 'GOOGLE_LOGIN', token: googleToken, gid: googleUser.sub, email: googleUser.email, name: googleUser.name });
                 showAlertBanner('Login com Google ativo! Salas personalizadas liberadas.');
