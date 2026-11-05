@@ -129,7 +129,6 @@
                     <img id="nav-avatar" src="" class="w-full h-full object-cover">
                 </div>
                 <span id="nav-username" class="font-bold hidden min-[420px]:inline max-w-[64px] sm:max-w-[110px] truncate text-brand-yellow">Perfil</span>
-                <span id="nav-img-timer" class="hidden text-[10px] font-bold text-zinc-400 whitespace-nowrap"></span>
             </button>
         </div>
     </header>
@@ -2377,7 +2376,6 @@
             const logged = !!(isGoogleLoggedIn && googleUser), custom = presetAvatarsList.indexOf(currentUser.avatar) < 0;
             const on = logged && custom && imgInfo.imgAt > 0, left = Math.max(0, imgInfo.imgAt + IMG_TTL_MS - Date.now());
             const $ = id => document.getElementById(id);
-            const nav = $('nav-img-timer'); if (nav) { nav.classList.toggle('hidden', !on); if (on) nav.textContent = '⏳ ' + fmtLeft(left); }
             const st = $('img-status'); if (!st) return;
             st.classList.remove('hidden');
             $('img-countdown').classList.toggle('hidden', !on); $('img-renew-btn').classList.toggle('hidden', !on);
