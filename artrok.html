@@ -123,6 +123,9 @@
                 <button data-lang="es" onclick="setLanguage('es')" class="lang-btn px-2.5 py-1 rounded-lg text-zinc-400 hover:text-white transition-all font-bold">ES</button>
             </div>
 
+            <!-- IDIOMA NO CELULAR: botão compacto que alterna PT > EN > ES -->
+            <button id="lang-cycle-btn" onclick="cycleLanguage()" title="Idioma / Language" aria-label="Idioma" class="sm:hidden flex-shrink-0 bg-zinc-900 border border-brand-border px-2 py-1.5 rounded-xl text-xs font-bold text-brand-yellow transition-all">PT</button>
+
             <!-- BOTÃO PERFIL -->
             <button onclick="toggleProfileModal()" class="flex items-center space-x-2 bg-zinc-900 hover:bg-zinc-800 border border-brand-border px-2 sm:px-3 py-1.5 rounded-xl text-sm transition-all">
                 <div class="w-7 h-7 rounded-md border-2 border-brand-yellow overflow-hidden flex items-center justify-center flex-shrink-0">
@@ -1496,7 +1499,7 @@
             const lobby = document.getElementById('lobby-screen'), game = document.getElementById('game-screen');
             lobby.classList.add('hidden'); lobby.style.display = 'none';
             game.classList.add('is-active'); game.style.display = '';
-            document.getElementById('lang-selector').classList.add('hidden');
+            document.getElementById('lang-selector').classList.add('hidden'); document.getElementById('lang-cycle-btn').classList.add('hidden');
             const badge = document.getElementById('private-room-code-badge');
             if (activeRoom.code) { document.getElementById('code-value').textContent = activeRoom.code; badge.classList.remove('hidden'); }
             else badge.classList.add('hidden');
@@ -1526,7 +1529,7 @@
             activeRoom = null; myWord = ''; freeOpen = false; exitFsAll(); document.getElementById('free-mode-modal').classList.add('hidden');
             const lobby = document.getElementById('lobby-screen'), game = document.getElementById('game-screen');
             game.classList.remove('is-active'); game.style.display = '';
-            document.getElementById('lang-selector').classList.remove('hidden');
+            document.getElementById('lang-selector').classList.remove('hidden'); document.getElementById('lang-cycle-btn').classList.remove('hidden');
             lobby.classList.remove('hidden'); lobby.style.display = 'block';
             document.getElementById('transition-overlay').classList.add('hidden');
             renderRooms();
@@ -2617,6 +2620,15 @@
     function all(root) { off(root); if (root.querySelectorAll) root.querySelectorAll('input,textarea,form').forEach(off); }
     all(document);
     new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) all(n); }))).observe(document.documentElement, { childList: true, subtree: true });
+})();
+// ---- botão de idioma do celular ----
+(function () {
+    const order = ['pt', 'en', 'es'];
+    const upd = () => { const b = document.getElementById('lang-cycle-btn'); if (b) b.textContent = (currentLang || 'pt').toUpperCase(); };
+    window.cycleLanguage = function () { setLanguage(order[(order.indexOf(currentLang) + 1) % 3]); };
+    const base = setLanguage;
+    setLanguage = function (l) { const r = base.apply(this, arguments); upd(); return r; };
+    upd();
 })();
 </script>
 </body>
