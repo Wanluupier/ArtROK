@@ -115,6 +115,8 @@ const MSG = {
   roomDeleted: { pt: 'A sala foi apagada pelo dono.', en: 'The room was deleted by its owner.', es: 'La sala fue eliminada por su dueño.' },
   roomDisabled: { pt: 'A sala foi desativada pelo dono.', en: 'The room was disabled by its owner.', es: 'La sala fue desactivada por su dueño.' },
   blocked: { pt: 'Mensagem bloqueada: não revele a resposta!', en: "Message blocked: don't reveal the answer!", es: '¡Mensaje bloqueado: no reveles la respuesta!' },
+  drawerGain: { pt: 'Você ganhou +{d} pt por {n} ter acertado.', en: 'You got +{d} pt because {n} guessed.', es: 'Ganaste +{d} pt porque {n} acertó.' },
+  drawerGainHint: { pt: 'Você ganhou +{d} pt por {n} ter acertado (dica usada: -50%).', en: 'You got +{d} pt because {n} guessed (hint used: -50%).', es: 'Ganaste +{d} pt porque {n} acertó (pista usada: -50%).' },
   anon: { pt: 'Anônimo', en: 'Anonymous', es: 'Anónimo' },
 };
 const tx = (lang, key, v) => ((MSG[key][lang] || MSG[key].pt)).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] !== undefined ? v[k] : ''));
@@ -488,7 +490,8 @@ function handleChat(p, room, m) {
   if (!p.guessed && sameWord(text, room.word)) {
     const pts = Math.max(1, room.players.size - room.guessed.size);
     p.guessed = true; room.guessed.add(p.id); p.score += pts;
-    const d = room.players.get(room.drawerId); if (d) d.score += room.hinted ? 1 : 2;
+    const d = room.players.get(room.drawerId); const dp = room.hinted ? 1 : 2;
+    if (d) { d.score += dp; d.send({ type: 'CHAT', channel: 'system', text: tx(d.lang, room.hinted ? 'drawerGainHint' : 'drawerGain', { d: dp, n: p.shownName }) }); }
     toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'system', text: tx(pl.lang, 'guessed', { n: p.shownName, p: pts }), ok: true }));
     broadcastRoom(room);
     if (room.guessed.size >= room.players.size - 1) endRound(room, 'allGot');
