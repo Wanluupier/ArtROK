@@ -2385,7 +2385,7 @@
             $('img-note').textContent = !logged
                 ? tr('Foto própria só com login Google. Anônimos usam os avatares do jogo.')
                 : tr('Sua foto sumirá em 10 dias para economia de espaço em nuvem.');
-            const tg = $('img-trocas'); tg.classList.toggle('hidden', !logged); if (logged) { const u = 3 - imgInfo.imgLeft; tg.textContent = trf('Trocas hoje: {n}/3', { n: u }) + (u > 0 ? ' · ' + tr('reinicia em') + ' ' + fmtLeft((brDay() + 1) * 864e5 + 3 * 3600e3 - Date.now()) : ''); }
+            const tg = $('img-trocas'); tg.classList.toggle('hidden', !logged); if (logged) { const u = 3 - imgInfo.imgLeft; tg.textContent = trf('Trocas hoje: {n}/3', { n: u }) + ' · ' + tr('reinicia em') + ' ' + fmtLeft((brDay() + 1) * 864e5 + 3 * 3600e3 - Date.now()); }
         }
         function renewAvatarImg() { renewPending = true; sendWS({ type: 'RENEW_IMG' }); }
         const _applyProfileBase = applyProfile;
