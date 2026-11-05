@@ -2383,7 +2383,7 @@
             $('img-countdown').classList.toggle('hidden', !on); $('img-renew-btn').classList.toggle('hidden', !on);
             if (on) { $('img-countdown').textContent = tr('⏳ Sua foto some em') + ' ' + fmtLeft(left); $('img-renew-btn').textContent = tr('🔄 Renovar foto (+10 dias)'); }
             $('img-note').textContent = !logged
-                ? tr('Foto ou GIF próprio só com login Google. Anônimos usam os avatares do jogo.')
+                ? tr('Foto própria só com login Google. Anônimos usam os avatares do jogo.')
                 : tr('Sua foto sumirá em 10 dias para economia de espaço em nuvem.');
             const tg = $('img-trocas'); tg.classList.toggle('hidden', !logged); if (logged) { const u = 3 - imgInfo.imgLeft; tg.textContent = trf('Trocas hoje: {n}/3', { n: u }) + (u > 0 ? ' · ' + tr('reinicia em') + ' ' + fmtLeft((brDay() + 1) * 864e5 + 3 * 3600e3 - Date.now()) : ''); }
         }
@@ -2401,7 +2401,7 @@
         Object.assign(I18N_D, {
             '⏳ Sua foto some em': { en: '⏳ Your photo disappears in', es: '⏳ Tu foto desaparece en' },
             '🔄 Renovar foto (+10 dias)': { en: '🔄 Renew photo (+10 days)', es: '🔄 Renovar foto (+10 días)' },
-            'Foto ou GIF próprio só com login Google. Anônimos usam os avatares do jogo.': { en: 'Custom photo or GIF requires Google sign-in. Guests use the game avatars.', es: 'Foto o GIF propio solo con Google. Los anónimos usan los avatares del juego.' },
+            'Foto própria só com login Google. Anônimos usam os avatares do jogo.': { en: 'Custom photo requires Google sign-in. Guests use the game avatars.', es: 'Foto propia solo con Google. Los anónimos usan los avatares del juego.' },
             'Sua foto sumirá em 10 dias para economia de espaço em nuvem.': { en: 'Your photo will disappear in 10 days to save cloud space.', es: 'Tu foto desaparecerá en 10 días para ahorrar espacio en la nube.' },
             'reinicia em': { en: 'resets in', es: 'se reinicia en' },
             'Trocas hoje: {n}/3': { en: 'Changes today: {n}/3', es: 'Cambios hoy: {n}/3' },
