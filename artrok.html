@@ -1224,7 +1224,7 @@
 
         function checkAllGuessedOrPoints() {
             if (!activeRoom || !activeRoom.players) return;
-            const winner = activeRoom.players.find(p => p.score >= 100);
+            const winner = activeRoom.players.find(p => p.score >= 30);
             if (winner) {
                 document.getElementById('winner-text').textContent = `O jogador ${winner.name || 'Anônimo'} venceu a partida com ${winner.score} pontos!`;
                 document.getElementById('winner-modal').classList.remove('hidden');
