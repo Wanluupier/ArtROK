@@ -91,7 +91,7 @@ async function setupDatabase() {
 
 // ---------------------------------------------------------------- textos (3 idiomas)
 const MSG = {
-  imgLimit: { pt: 'Limite de 3 trocas de foto por dia. Tente amanhã!', en: 'Limit of 3 photo changes per day. Try again tomorrow!', es: '¡Límite de 3 cambios de foto por día. Inténtalo mañana!' },
+  imgLimit: { pt: 'Limite de 3 trocas de foto por dia. Tente amanhã!', en: 'Limit of 3 photo changes per day. Try again tomorrow!', es: 'Límite de 3 cambios de foto por día. ¡Inténtalo mañana!' },
   alreadyPlaying: { pt: 'Você já está jogando em outra aba ou dispositivo.', en: 'You are already playing in another tab or device.', es: 'Ya estás jugando en otra pestaña o dispositivo.' },
   roomFull: { pt: 'Sala cheia.', en: 'Room is full.', es: 'Sala llena.' },
   notFound: { pt: 'Sala não encontrada.', en: 'Room not found.', es: 'Sala no encontrada.' },
