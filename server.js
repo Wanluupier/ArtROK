@@ -372,7 +372,7 @@ function joinRoom(p, room) {
 function mask(room) {
   return [...room.word].map((ch, i) => (ch === ' ' ? ' ' : (room.revealed.has(i) ? ch : '_'))).join(' ').replace(/ {3}/g, '   ');
 }
-const WIN_SCORE = 100;
+const WIN_SCORE = 30;
 function startGame(room) {
   room.roundsDone = 0; room.maxRounds = 1e9;
   for (const pl of room.players.values()) pl.score = 0;
