@@ -341,7 +341,7 @@ function leaveRoom(p, silent) {
     if (room.kind === 'private') rooms.delete(room.id);
   } else {
     if (room.phase === 'drawing' && room.drawerId === p.id) endRound(room, 'drawerLeft');
-    else if (room.players.size < 2) { clearInterval(room.interval); clearTimeout(room.timer); room.phase = 'waiting'; room.drawerId = ''; room.hint = ''; room.roundsDone = 0; broadcastRoom(room); }
+    else if (room.players.size < 2) { clearInterval(room.interval); clearTimeout(room.timer); room.phase = 'waiting'; room.drawerId = ''; room.hint = ''; room.roundsDone = 0; room.snapshot = null; toRoom(room, pl => pl.send({ type: 'CANVAS_CLEAR' })); broadcastRoom(room); }
     else { room.votes.forEach(v => v.delete(p.id)); broadcastRoom(room); }
   }
   lobbyAll();
@@ -438,6 +438,7 @@ function nextRound(room) {
 function endRound(room, kind) {
   if (room.phase !== 'drawing') return;
   clearInterval(room.interval); room.interval = null; room.phase = 'between';
+  room.snapshot = null; toRoom(room, pl => pl.send({ type: 'CANVAS_CLEAR' }));
   const word = room.word;
   toRoom(room, pl => pl.send({ type: 'ROUND_END', kind: kind === 'skipped' ? 'skip' : kind === 'reported' ? 'report' : 'end', title: tx(pl.lang, kind), word }));
   room.hint = word; broadcastRoom(room);
