@@ -1237,7 +1237,7 @@
         }
 
         const PUBLIC_NOTICE_RE = /denunci|reportou|reported|reportó|bani|ban\b|banned|vot(o|ou|aram|ed|ó)\b|votes?\b|votos\b/i;
-        function addChatMessage(type, msg, scope, silent) {
+        function addChatMessage(type, msg, scope, silent, near) {
             const toPublic = type === 'public' || scope === 'public' || (type === 'system' && PUBLIC_NOTICE_RE.test(String(msg)));
             if (toPublic && !silent && activeChatTab !== 'public') { chatUnread++; renderChatBadge(); }
             const containerId = toPublic ? 'chat-messages-public' : 'chat-messages-guess';
@@ -1249,7 +1249,7 @@
             if (type === 'system') {
                 el.className += ' bg-brand-yellow/10 text-brand-yellow font-bold border border-brand-yellow/20 text-center';
             } else if (type === 'guess') {
-                el.className += ' bg-zinc-900 text-zinc-300 border-l-2 border-brand-yellow';
+                el.className += near ? ' bg-yellow-400/15 text-yellow-300 font-bold border-l-2 border-yellow-400' : ' bg-zinc-900 text-zinc-300 border-l-2 border-brand-yellow';
             } else {
                 el.className += ' bg-zinc-800 text-zinc-200 border-l-2 border-blue-500';
             }
@@ -1545,7 +1545,7 @@
                 case 'WORD': myWord = m.word; hintAvail = true; refreshRoomUI(); break;
                 case 'HINT_OK': hintAvail = false; showAlertBanner('Dica ativada: seus pontos por acerto caem 50%.'); refreshRoomUI(); break;
                 case 'TICK': document.getElementById('game-timer').textContent = `${m.t}s`; if (m.t > 0 && m.t <= 5) SFX.tick(); break;
-                case 'CHAT': addChatMessage(m.channel, m.text, m.scope); if (m.channel === 'system' && (m.ok || m.text.includes('acertou'))) SFX.correct(); break;
+                case 'CHAT': addChatMessage(m.channel, m.text, m.scope, false, m.near); if (m.channel === 'system' && (m.ok || m.text.includes('acertou'))) SFX.correct(); break;
                 case 'CHAT_HISTORY': m.items.forEach(t => addChatMessage('public', t, null, true)); break;
                 case 'BANNED': if (activeRoom) SFX.ban(); else SFX.blocked(); showBanned(m); break;
                 case 'ERROR': showAlertBanner(m.msg); break;
