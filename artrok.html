@@ -237,6 +237,11 @@
                     <span>Pular Desenho</span>
                 </button>
 
+                <button id="btn-hint" onclick="useHint()" class="hidden w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 text-brand-yellow font-bold text-xs rounded-lg border border-brand-border flex items-center justify-center space-x-1">
+                    <i data-lucide="lightbulb" class="w-3.5 h-3.5"></i>
+                    <span>Dar Dica (-50% pts)</span>
+                </button>
+
                 <button onclick="leaveRoom()" class="btn-leave w-full py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-lg shadow transition-all">
                     Sair da Sala
                 </button>
@@ -1434,7 +1439,14 @@
             return presetAvatarsList[p.av] || presetAvatarsList[4];
         }
         let winsById = {};
+        let hintAvail = false;
+        function useHint() {
+            if (!activeRoom || activeRoom.drawerId !== currentUser.id || !hintAvail || activeRoom.guessedPlayers.length) return;
+            sendWS({ type: 'HINT' });
+        }
         function applyRoom(s) {
+            if (s.you) currentUser.id = s.you;
+            if (activeRoom && activeRoom.drawerId !== s.drawerId) hintAvail = false;
             const isNew = !activeRoom || activeRoom.id !== s.id;
             if (isNew) winsById = {};
             const oldWins = {}; if (activeRoom) activeRoom.players.forEach(p => oldWins[p.id] = p.wins || 0);
@@ -1530,7 +1542,8 @@
             switch (m.type) {
                 case 'LOBBY': applyLobby(m.rooms); break;
                 case 'JOINED': case 'ROOM': applyRoom(m.room); break;
-                case 'WORD': myWord = m.word; refreshRoomUI(); break;
+                case 'WORD': myWord = m.word; hintAvail = true; refreshRoomUI(); break;
+                case 'HINT_OK': hintAvail = false; showAlertBanner('Dica ativada: seus pontos por acerto caem 50%.'); refreshRoomUI(); break;
                 case 'TICK': document.getElementById('game-timer').textContent = `${m.t}s`; if (m.t > 0 && m.t <= 5) SFX.tick(); break;
                 case 'CHAT': addChatMessage(m.channel, m.text, m.scope); if (m.channel === 'system' && (m.ok || m.text.includes('acertou'))) SFX.correct(); break;
                 case 'CHAT_HISTORY': m.items.forEach(t => addChatMessage('public', t, null, true)); break;
@@ -1636,8 +1649,11 @@
                 item.innerHTML = `
                     <div class="flex items-center space-x-2 overflow-hidden">
                         <span class="w-5 text-center text-[11px] font-mono font-bold text-zinc-500 flex-shrink-0">${(p.score || 0) > 0 && rank < 3 ? medals[rank] : rank + 1}</span>
-                        <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border border-brand-yellow overflow-hidden flex items-center justify-center flex-shrink-0">
-                            <img src="${p.avatar}" class="w-full h-full object-cover">
+                        <div class="relative flex-shrink-0">
+                            <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg border border-brand-yellow overflow-hidden flex items-center justify-center">
+                                <img src="${p.avatar}" class="w-full h-full object-cover">
+                            </div>
+                            ${winBadge(p.wins)}
                         </div>
                         <div class="truncate">
                             <div class="flex items-center space-x-1">
@@ -2173,6 +2189,7 @@
             if (!activeRoom) return;
             const drawing = canDraw();
             document.getElementById('btn-skip-draw').classList.toggle('hidden', !drawing);
+            document.getElementById('btn-hint').classList.toggle('hidden', !(drawing && hintAvail && !activeRoom.guessedPlayers.length));
             document.getElementById('btn-fs-panel').classList.toggle('hidden', !drawing);
             if (!drawing) exitFsFor(document.getElementById('canvas-container-box'));
             const inFree = activeRoom.players.filter(p => p.free && p.id !== currentUser.id).length;
