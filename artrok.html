@@ -969,7 +969,7 @@
             };
 
             const startDraw = (e) => {
-                if (!activeRoom || activeRoom.players.length < 2 || activeRoom.drawerId !== currentUser.id) return;
+                if (!activeRoom || activeRoom.players.length < 2 || activeRoom.drawerId !== currentUser.id || activeRoom.phase === 'between') return;
                 const pos = getPos(e);
                 lastX = pos.x; lastY = pos.y;
 
@@ -983,6 +983,7 @@
 
             const moveDraw = (e) => {
                 if (!isDrawing || !activeRoom || activeRoom.drawerId !== currentUser.id) return;
+                if (activeRoom.phase === 'between') { stopDraw(); return; }
                 if (e.type === 'mousemove' && e.buttons === 0) { stopDraw(); return; }
                 const pos = getPos(e);
                 drawLineLocal(lastX, lastY, pos.x, pos.y, currentColor, currentLineWidth, currentTool === 'eraser');
