@@ -2542,5 +2542,14 @@
         restoreGoogleSession();
         connectServer();
     </script>
+<script>
+// desliga o histórico/autocompletar do navegador em todos os campos de texto (inclusive os criados depois)
+(function () {
+    function off(el) { if (el.matches && el.matches('input,textarea,form')) { el.setAttribute('autocomplete', 'off'); if (el.tagName !== 'FORM') { el.setAttribute('autocorrect', 'off'); el.setAttribute('autocapitalize', 'off'); } } }
+    function all(root) { off(root); if (root.querySelectorAll) root.querySelectorAll('input,textarea,form').forEach(off); }
+    all(document);
+    new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => { if (n.nodeType === 1) all(n); }))).observe(document.documentElement, { childList: true, subtree: true });
+})();
+</script>
 </body>
 </html>
