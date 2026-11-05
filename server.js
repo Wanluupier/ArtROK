@@ -429,12 +429,44 @@ function gameOver(room) {
   room.timer = setTimeout(() => { if (room.players.size >= 2) startGame(room); }, 11000);
 }
 
+// ---- anti-spoiler: detecta resposta (ou quase) numa mensagem
+function lev(a, b) {
+  const m = a.length, n = b.length; if (!m) return n; if (!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
+  return prev[n];
+}
+function isNear(text, word) {
+  const variants = [[norm(text), norm(word)], [norm(text.replace(ART, '')), norm(word.replace(ART, ''))]];
+  for (const [a, b] of variants) {
+    if (!a || !b) continue;
+    if (a === b) return true;
+    const lim = b.length >= 8 ? 2 : b.length >= 4 ? 1 : 0;
+    if (lim && Math.abs(a.length - b.length) <= lim && lev(a, b) <= lim) return true;
+  }
+  return false;
+}
+// troca por asteriscos o trecho que é (ou quase é) a resposta
+function maskLeaks(text, word) {
+  const n = String(word).trim().split(/\s+/).length;
+  const parts = text.split(/(\s+)/); // palavras nas posições pares
+  let hit = false;
+  for (let i = 0; i < parts.length; i += 2) {
+    let end = i + (n - 1) * 2; if (end >= parts.length) break;
+    const chunk = parts.slice(i, end + 1).join('');
+    if (isNear(chunk, word)) { const stars = '*'.repeat(chunk.replace(/\s/g, '').length); for (let k = i; k <= end; k++) parts[k] = ''; parts[i] = stars; hit = true; i = end; }
+  }
+  let out = parts.join('');
+  if (!hit && norm(text).includes(norm(word)) && norm(word).length >= 3) out = '*'.repeat(text.length);
+  return out;
+}
 function handleChat(p, room, m) {
   if (spamCheck(room, p)) return;
   const text = clean(m.text, 120); if (!text) return;
   const now = Date.now(); p.chatTimes = p.chatTimes.filter(t => now - t < 4000); if (p.chatTimes.length >= 6) return; p.chatTimes.push(now);
   if (m.channel === 'public') {
-    const line = p.shownName + ': ' + text; room.history.push(line); if (room.history.length > 60) room.history.shift();
+    const safe = room.phase === 'drawing' ? maskLeaks(text, room.word) : text;
+    const line = p.shownName + ': ' + safe; room.history.push(line); if (room.history.length > 60) room.history.shift();
     toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'public', text: line })); return;
   }
   if (room.phase !== 'drawing' || p.id === room.drawerId) return;
@@ -447,7 +479,8 @@ function handleChat(p, room, m) {
     if (room.guessed.size >= room.players.size - 1) endRound(room, 'allGot');
     return;
   }
-  const line = p.shownName + ': ' + text;
+  if (!p.guessed && isNear(text, room.word)) { p.send({ type: 'CHAT', channel: 'guess', text: p.shownName + ': ' + text, near: true }); return; }
+  const line = p.shownName + ': ' + (p.guessed ? maskLeaks(text, room.word) : text);
   toRoom(room, pl => { if (!p.guessed || pl.guessed || pl.id === room.drawerId) pl.send({ type: 'CHAT', channel: 'guess', text: line }); });
 }
 
