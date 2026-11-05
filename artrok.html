@@ -192,16 +192,18 @@
         <!-- SEÇÃO 3: SALAS PARTICULARES -->
         <div id="section-private-rooms" class="hidden space-y-4">
             <div class="bg-brand-card p-4 sm:p-5 rounded-xl border border-brand-border flex flex-col sm:flex-row items-center justify-between gap-4">
-                <select id="private-room-theme-select" class="w-full sm:w-auto bg-zinc-900 border border-brand-border rounded-xl px-3 py-3 text-xs text-white font-bold focus:outline-none focus:border-brand-yellow">
-                    <option value="misto">Todos os modos (misto)</option>
-                    <option value="alimentos">Alimentos</option>
-                    <option value="gerais">Gerais</option>
-                    <option value="verbos">Verbos</option>
-                    <option value="animais">Animais</option>
-                    <option value="bandeiras">Bandeiras</option>
-                    <option value="animes">Animes</option>
-                    <option value="filmes">Filmes</option>
-                </select>
+                <div class="w-full sm:w-auto flex flex-col gap-1.5">
+                    <label for="private-room-theme-select" class="text-xs font-bold text-zinc-300 uppercase tracking-wider">Escolha o modo</label>
+                    <select id="private-room-theme-select" class="w-full bg-zinc-900 border border-brand-border rounded-xl px-3 py-3 text-xs text-white font-bold focus:outline-none focus:border-brand-yellow">
+                        <option value="alimentos" selected>Alimentos</option>
+                        <option value="gerais">Gerais</option>
+                        <option value="verbos">Verbos</option>
+                        <option value="animais">Animais</option>
+                        <option value="bandeiras">Bandeiras</option>
+                        <option value="animes">Animes</option>
+                        <option value="filmes">Filmes</option>
+                    </select>
+                </div>
                 <button onclick="createPrivateRoom()" class="w-full sm:w-auto px-6 py-3 bg-brand-yellow text-black font-extrabold rounded-xl text-xs uppercase transition-all shadow-md">
                     Criar Sala Particular
                 </button>
@@ -1424,7 +1426,7 @@
         function waitJoin() { clearTimeout(joinTimer); joinTimer = setTimeout(() => showAlertBanner('O servidor não respondeu. Tente novamente.'), 6000); }
         function enterRoom(id) { sendWS({ type: 'JOIN', roomId: id, lang: currentLang }) && waitJoin(); }
         function enterCustomRoom(id) { sendWS({ type: 'JOIN', roomId: id, lang: currentLang }) && waitJoin(); }
-        function createPrivateRoom() { sendWS({ type: 'CREATE_PRIVATE', lang: currentLang, themeId: (document.getElementById('private-room-theme-select') || {}).value || 'misto' }) && waitJoin(); }
+        function createPrivateRoom() { sendWS({ type: 'CREATE_PRIVATE', lang: currentLang, themeId: (document.getElementById('private-room-theme-select') || {}).value || 'alimentos' }) && waitJoin(); }
         function joinPrivateRoomByCode() {
             const n = parseInt(document.getElementById('private-code-input').value.trim());
             if (isNaN(n) || n < 100 || n > 999) { showAlertBanner('Digite um código de 3 dígitos válido!'); return; }
