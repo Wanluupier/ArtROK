@@ -227,7 +227,7 @@ class Player {
 function mkRoom(o) {
   const r = Object.assign({ players: new Map(), order: [], phase: 'waiting', drawerId: '', word: '', hint: '', revealed: new Set(),
     guessed: new Set(), reports: new Set(), votes: new Map(), timeLeft: 0, interval: null, timer: null, snapshot: null,
-    roundsDone: 0, maxRounds: 0, recent: [], history: [], emptySince: Date.now(), turn: -1 }, o);
+    roundsDone: 0, maxRounds: 0, recent: [], history: [], emptySince: Date.now(), turn: -1, wins: new Map(), hinted: false }, o);
   rooms.set(r.id, r); return r;
 }
 function publicRoom(theme, lang) {
@@ -250,10 +250,10 @@ async function persistCustom() {
 
 function view(room, to) {
   return {
-    id: room.id, name: room.name, code: room.code || null, phase: room.phase, hint: room.hint, drawerId: room.drawerId,
+    you: to.id, id: room.id, name: room.name, code: room.code || null, phase: room.phase, hint: room.hint, drawerId: room.drawerId,
     themeId: room.themeId, themeName: room.themeName || room.name,
     players: [...room.players.values()].map(pl => {
-      const e = { id: pl.id, name: pl.name, score: pl.score, free: pl.free, guessed: pl.guessed, bio: pl.bio, av: pl.av, imgRev: pl.imgRev || undefined };
+      const e = { id: pl.id, name: pl.name, score: pl.score, free: pl.free, guessed: pl.guessed, bio: pl.bio, av: pl.av, wins: room.wins.get(pl.id) || 0, imgRev: pl.imgRev || undefined };
       if (pl.img && to.sentImg[pl.id] !== pl.imgRev) { e.img = pl.img; to.sentImg[pl.id] = pl.imgRev; }
       return e;
     })
@@ -309,7 +309,7 @@ function leaveRoom(p, silent) {
   if (prevW) notifyWatchers(room, prevW);
   if (!silent) sys(room, 'left', { n: p.shownName });
   if (room.players.size === 0) {
-    clearInterval(room.interval); clearTimeout(room.timer); room.interval = room.timer = null; room.phase = 'waiting'; room.drawerId = ''; room.snapshot = null; room.emptySince = Date.now();
+    clearInterval(room.interval); clearTimeout(room.timer); room.interval = room.timer = null; room.phase = 'waiting'; room.drawerId = ''; room.snapshot = null; room.emptySince = Date.now(); room.wins = new Map(); room.hinted = false;
     if (room.kind === 'private') rooms.delete(room.id);
   } else {
     if (room.phase === 'drawing' && room.drawerId === p.id) endRound(room, 'drawerLeft');
@@ -319,6 +319,23 @@ function leaveRoom(p, silent) {
   lobbyAll();
 }
 
+function adoptId(p, newId) {
+  if (p.id === newId) return;
+  const old = byId.get(newId); if (old && old !== p) { leaveRoom(old, true); try { old.socket.destroy(); } catch (e) {} conns.delete(old); byId.delete(newId); }
+  const oldId = p.id; if (oldId && byId.get(oldId) === p) byId.delete(oldId);
+  const room = p.roomId && rooms.get(p.roomId);
+  if (room && oldId) {
+    const players = new Map(); for (const [k, v] of room.players) players.set(k === oldId ? newId : k, v); room.players = players;
+    room.order = room.order.map(i => (i === oldId ? newId : i));
+    if (room.drawerId === oldId) room.drawerId = newId;
+    if (room.guessed.has(oldId)) { room.guessed.delete(oldId); room.guessed.add(newId); }
+    if (room.reports.has(oldId)) { room.reports.delete(oldId); room.reports.add(newId); }
+    if (room.votes.has(oldId)) { room.votes.set(newId, room.votes.get(oldId)); room.votes.delete(oldId); }
+    if (room.wins.has(oldId)) { room.wins.set(newId, room.wins.get(oldId)); room.wins.delete(oldId); }
+    for (const o of room.players.values()) { if (o.freeWatch === oldId) o.freeWatch = newId; }
+  }
+  p.id = newId; byId.set(newId, p);
+}
 const ownsRoom = (p, r) => !!(r && r.kind === 'custom' && p.verified && p.gid && r.ownerGid === p.gid);
 function kickAll(room, key) {
   for (const pl of [...room.players.values()]) { pl.send({ type: 'ROOM_CLOSED', msg: tx(pl.lang, key) }); leaveRoom(pl, true); }
@@ -352,8 +369,9 @@ function joinRoom(p, room) {
 function mask(room) {
   return [...room.word].map((ch, i) => (ch === ' ' ? ' ' : (room.revealed.has(i) ? ch : '_'))).join(' ').replace(/ {3}/g, '   ');
 }
+const WIN_SCORE = 100;
 function startGame(room) {
-  room.roundsDone = 0; room.maxRounds = Math.max(6, room.players.size * 2);
+  room.roundsDone = 0; room.maxRounds = 1e9;
   for (const pl of room.players.values()) pl.score = 0;
   nextRound(room);
 }
@@ -370,7 +388,7 @@ function nextRound(room) {
   if (ids.length < 2) { room.phase = 'waiting'; room.drawerId = ''; broadcastRoom(room); return; }
   room.turn = (room.turn + 1) % room.order.length;
   let drawer = room.order[room.turn]; if (!room.players.has(drawer)) { room.turn = 0; drawer = room.order[0]; }
-  room.drawerId = drawer; room.word = pickWord(room); room.revealed = new Set(); room.hint = mask(room);
+  room.drawerId = drawer; room.word = pickWord(room); room.revealed = new Set(); room.hint = mask(room); room.hinted = false;
   room.phase = 'drawing'; room.guessed = new Set(); room.reports = new Set(); room.timeLeft = ROUND_SECONDS; room.snapshot = null;
   toRoom(room, pl => { pl.guessed = false; });
   const d = room.players.get(drawer);
@@ -398,11 +416,12 @@ function endRound(room, kind) {
   room.roundsDone++;
   room.timer = setTimeout(() => {
     if (room.players.size < 2) { room.phase = 'waiting'; room.drawerId = ''; room.hint = ''; broadcastRoom(room); return; }
-    if (room.roundsDone >= room.maxRounds) gameOver(room); else nextRound(room);
+    if ([...room.players.values()].some(x => x.score >= WIN_SCORE)) gameOver(room); else nextRound(room);
   }, BETWEEN_MS);
 }
 function gameOver(room) {
   const best = [...room.players.values()].sort((a, b) => b.score - a.score)[0];
+  if (best) room.wins.set(best.id, (room.wins.get(best.id) || 0) + 1);
   toRoom(room, pl => pl.send({ type: 'GAME_OVER', name: best ? best.shownName : '', score: best ? best.score : 0 }));
   room.phase = 'waiting'; room.drawerId = ''; room.hint = '';
   toRoom(room, pl => { pl.score = 0; pl.guessed = false; });
@@ -420,9 +439,9 @@ function handleChat(p, room, m) {
   }
   if (room.phase !== 'drawing' || p.id === room.drawerId) return;
   if (!p.guessed && sameWord(text, room.word)) {
-    const pts = Math.max(20, Math.round(100 * room.timeLeft / ROUND_SECONDS) + 20 - 10 * room.guessed.size);
+    const pts = Math.max(1, room.players.size - room.guessed.size);
     p.guessed = true; room.guessed.add(p.id); p.score += pts;
-    const d = room.players.get(room.drawerId); if (d) d.score += 20;
+    const d = room.players.get(room.drawerId); if (d) d.score += room.hinted ? 1 : 2;
     toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'system', text: tx(pl.lang, 'guessed', { n: p.shownName, p: pts }), ok: true }));
     broadcastRoom(room);
     if (room.guessed.size >= room.players.size - 1) endRound(room, 'allGot');
@@ -486,11 +505,10 @@ function onMessage(p, m) {
       requestedId = 'g_' + p.gid; 
     }
     
+    if (!(p.verified && p.gid) && requestedId.startsWith('g_')) requestedId = 'u_' + crypto.randomBytes(6).toString('hex');
     const id = requestedId.match(/^[\w-]{1,64}$/) ? requestedId : null; if (!id) return;
     
-    if (p.id && p.id !== id) { leaveRoom(p, true); byId.delete(p.id); }
-    const old = byId.get(id); if (old && old !== p) { leaveRoom(old, true); try { old.socket.destroy(); } catch (e) {} conns.delete(old); }
-    p.id = id; byId.set(id, p);
+    if (p.id) adoptId(p, id); else { const old = byId.get(id); if (old && old !== p) { leaveRoom(old, true); try { old.socket.destroy(); } catch (e) {} conns.delete(old); } p.id = id; byId.set(id, p); }
     
     p.name = clean(m.name, 50); p.bio = clean(m.bio, 50); p.av = Number.isInteger(m.av) && m.av >= 0 && m.av < 5 ? m.av : 4;
     p.device = clean(m.device, 80); if (LANGS.includes(m.lang)) p.lang = m.lang;
@@ -499,12 +517,7 @@ function onMessage(p, m) {
     if (m.gtoken && !p.verified) {
       googleLogin(p, m.gtoken, m.gid).then(() => {
         if (p.verified && p.gid) {
-          const newGoogleId = 'g_' + p.gid;
-          if (p.id !== newGoogleId) {
-            byId.delete(p.id);
-            p.id = newGoogleId;
-            byId.set(newGoogleId, p);
-          }
+          adoptId(p, 'g_' + p.gid);
           const acc = accounts[p.gid];
           if (acc) {
             p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av;
@@ -528,12 +541,7 @@ function onMessage(p, m) {
     case 'GOOGLE_LOGIN': 
       googleLogin(p, m.token, m.gid).then(() => {
         if (p.verified && p.gid) {
-          const newGoogleId = 'g_' + p.gid;
-          if (p.id !== newGoogleId) {
-            byId.delete(p.id);
-            p.id = newGoogleId;
-            byId.set(newGoogleId, p);
-          }
+          adoptId(p, 'g_' + p.gid);
           const acc = accounts[p.gid];
           if (acc) {
             p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av;
@@ -602,6 +610,15 @@ function onMessage(p, m) {
       const r = rooms.get(String(m.roomId || '')); if (!ownsRoom(p, r)) return p.err('notOwner');
       r.disabled = !!m.disabled; if (r.disabled) kickAll(r, 'roomDisabled');
       persistCustom(); lobbyAll(); break;
+    }
+    case 'HINT': {
+      if (!room || room.phase !== 'drawing' || room.drawerId !== p.id || room.hinted || room.guessed.size > 0) break;
+      const letters = [...room.word].map((c, i) => i).filter(i => room.word[i] !== ' ');
+      const hidden = letters.filter(i => !room.revealed.has(i));
+      const n = Math.min(Math.max(1, Math.floor(letters.length / 3)), Math.max(0, hidden.length - 1));
+      room.hinted = true;
+      for (let k = 0; k < n; k++) { const i = hidden.splice(rnd(hidden.length), 1)[0]; room.revealed.add(i); }
+      room.hint = mask(room); broadcastRoom(room); p.send({ type: 'HINT_OK' }); break;
     }
     case 'LEAVE': leaveRoom(p); break;
     case 'CHAT': if (room) handleChat(p, room, m); break;
