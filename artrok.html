@@ -383,6 +383,7 @@
                 <div id="img-countdown" class="hidden text-[11px] font-bold text-brand-yellow"></div>
                 <button id="img-renew-btn" type="button" onclick="renewAvatarImg()" class="hidden px-3 py-1 rounded-lg bg-zinc-800 border border-brand-yellow text-brand-yellow text-[11px] font-bold hover:bg-zinc-700">🔄 Renovar foto</button>
                 <p id="img-note" class="text-[10px] leading-tight text-zinc-500"></p>
+                <span id="img-trocas" class="hidden inline-block px-2.5 py-0.5 rounded-md bg-brand-yellow text-black text-[11px] font-bold"></span>
             </div>
 
             <!-- SELEÇÃO DOS 5 AVATARES EXCLUSIVOS P&B -->
@@ -2381,7 +2382,8 @@
             if (on) { $('img-countdown').textContent = tr('⏳ Sua foto some em') + ' ' + fmtLeft(left); $('img-renew-btn').textContent = tr('🔄 Renovar foto (+10 dias)'); }
             $('img-note').textContent = !logged
                 ? tr('Foto ou GIF próprio só com login Google. Anônimos usam os avatares do jogo.')
-                : tr('Fotos e GIFs são apagados após 10 dias sem renovar (para economizar espaço).') + ' ' + trf('Trocas hoje: {n}/3', { n: 3 - imgInfo.imgLeft });
+                : tr('Sua foto ou GIF sumirá em 10 dias para economia de espaço em nuvem.');
+            const tg = $('img-trocas'); tg.classList.toggle('hidden', !logged); if (logged) tg.textContent = trf('Trocas hoje: {n}/3', { n: 3 - imgInfo.imgLeft });
         }
         function renewAvatarImg() { renewPending = true; sendWS({ type: 'RENEW_IMG' }); }
         const _applyProfileBase = applyProfile;
@@ -2398,10 +2400,10 @@
             '⏳ Sua foto some em': { en: '⏳ Your photo disappears in', es: '⏳ Tu foto desaparece en' },
             '🔄 Renovar foto (+10 dias)': { en: '🔄 Renew photo (+10 days)', es: '🔄 Renovar foto (+10 días)' },
             'Foto ou GIF próprio só com login Google. Anônimos usam os avatares do jogo.': { en: 'Custom photo or GIF requires Google sign-in. Guests use the game avatars.', es: 'Foto o GIF propio solo con Google. Los anónimos usan los avatares del juego.' },
-            'Fotos e GIFs são apagados após 10 dias sem renovar (para economizar espaço).': { en: 'Photos and GIFs are deleted after 10 days unless renewed (to save space).', es: 'Las fotos y GIFs se borran tras 10 días sin renovar (para ahorrar espacio).' },
+            'Sua foto ou GIF sumirá em 10 dias para economia de espaço em nuvem.': { en: 'Your photo or GIF will disappear in 10 days to save cloud space.', es: 'Tu foto o GIF desaparecerá en 10 días para ahorrar espacio en la nube.' },
             'Trocas hoje: {n}/3': { en: 'Changes today: {n}/3', es: 'Cambios hoy: {n}/3' },
             'Faça login com o Google para usar foto ou GIF próprio.': { en: 'Sign in with Google to use your own photo or GIF.', es: 'Inicia sesión con Google para usar tu foto o GIF.' },
-            'Limite de 3 trocas de foto por dia. Tente amanhã!': { en: 'Limit of 3 photo changes per day. Try again tomorrow!', es: '¡Límite de 3 cambios de foto por día. Inténtalo mañana!' },
+            'Limite de 3 trocas de foto por dia. Tente amanhã!': { en: 'Limit of 3 photo changes per day. Try again tomorrow!', es: 'Límite de 3 cambios de foto por día. ¡Inténtalo mañana!' },
             'Foto renovada por mais 10 dias!': { en: 'Photo renewed for 10 more days!', es: '¡Foto renovada por 10 días más!' }
         });
 
