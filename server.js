@@ -114,6 +114,7 @@ const MSG = {
   notOwner: { pt: 'Só o dono da sala pode fazer isso.', en: 'Only the room owner can do that.', es: 'Solo el dueño de la sala puede hacer eso.' },
   roomDeleted: { pt: 'A sala foi apagada pelo dono.', en: 'The room was deleted by its owner.', es: 'La sala fue eliminada por su dueño.' },
   roomDisabled: { pt: 'A sala foi desativada pelo dono.', en: 'The room was disabled by its owner.', es: 'La sala fue desactivada por su dueño.' },
+  blocked: { pt: 'Mensagem bloqueada: não revele a resposta!', en: "Message blocked: don't reveal the answer!", es: '¡Mensaje bloqueado: no reveles la respuesta!' },
   anon: { pt: 'Anônimo', en: 'Anonymous', es: 'Anónimo' },
 };
 const tx = (lang, key, v) => ((MSG[key][lang] || MSG[key].pt)).replace(/\{(\w+)\}/g, (_, k) => (v && v[k] !== undefined ? v[k] : ''));
@@ -436,35 +437,49 @@ function lev(a, b) {
   for (let i = 1; i <= m; i++) { const cur = [i]; for (let j = 1; j <= n; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = cur; }
   return prev[n];
 }
-function isNear(text, word) {
-  const variants = [[norm(text), norm(word)], [norm(text.replace(ART, '')), norm(word.replace(ART, ''))]];
-  for (const [a, b] of variants) {
-    if (!a || !b) continue;
-    if (a === b) return true;
-    const lim = b.length >= 8 ? 2 : b.length >= 4 ? 1 : 0;
-    if (lim && Math.abs(a.length - b.length) <= lim && lev(a, b) <= lim) return true;
-  }
+// 2 = contém a resposta inteira | 1 = chegou perto (parte da palavra, letras trocadas) | 0 = normal
+function nearOne(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const lim = b.length >= 8 ? 3 : b.length >= 6 ? 2 : b.length >= 4 ? 1 : 0;
+  if (lim && Math.abs(a.length - b.length) <= lim && lev(a, b) <= lim) return true;
+  if (a.length >= 3 && a.length >= Math.ceil(b.length * 0.5) && (b.startsWith(a) || b.endsWith(a))) return true;
+  if (b.length >= 6 && a.length >= 4 && b.length - a.length <= 2 && a.startsWith(b.slice(0, 4))) return true;
   return false;
+}
+function leakLevel(text, word) {
+  const bw = norm(word); if (!bw || bw.length < 2) return 0;
+  const A = [norm(text), norm(text.replace(ART, ''))], B = [bw, norm(word.replace(ART, ''))];
+  const parts = String(word).trim().split(/\s+/).map(norm).filter(x => x.length >= 4);
+  if (bw.length >= 3 && A[0].includes(bw)) return 2;
+  for (const a of A) for (const b of B) { if (b.length >= 3 && a.includes(b)) return 2; if (nearOne(a, b)) return 1; }
+  if (parts.length > 1) for (const a of A) for (const b of parts) { if (a.includes(b) || nearOne(a, b)) return 1; }
+  const targets = parts.length > 1 ? parts : [bw];
+  for (const tk of String(text).split(/\s+/).map(norm)) { if (tk.length < 3) continue; for (const b of targets) if (b.length >= 3 && nearOne(tk, b)) return 1; }
+  return 0;
 }
 // troca por asteriscos o trecho que é (ou quase é) a resposta
 function maskLeaks(text, word) {
   const n = String(word).trim().split(/\s+/).length;
   const parts = text.split(/(\s+)/); // palavras nas posições pares
-  let hit = false;
-  for (let i = 0; i < parts.length; i += 2) {
-    let end = i + (n - 1) * 2; if (end >= parts.length) break;
-    const chunk = parts.slice(i, end + 1).join('');
-    if (isNear(chunk, word)) { const stars = '*'.repeat(chunk.replace(/\s/g, '').length); for (let k = i; k <= end; k++) parts[k] = ''; parts[i] = stars; hit = true; i = end; }
+  const sizes = n > 1 ? [n, 1] : [1];
+  for (const size of sizes) {
+    for (let i = 0; i < parts.length; i += 2) {
+      const end = i + (size - 1) * 2; if (end >= parts.length) break;
+      const chunk = parts.slice(i, end + 1).join('');
+      if (!chunk.trim() || (size === 1 && n > 1 && norm(chunk).length < 4)) continue;
+      if (leakLevel(chunk, word) >= 1) { const stars = '*'.repeat(chunk.replace(/\s/g, '').length); for (let k = i; k <= end; k++) parts[k] = ''; parts[i] = stars; i = end; }
+    }
   }
-  let out = parts.join('');
-  if (!hit && norm(text).includes(norm(word)) && norm(word).length >= 3) out = '*'.repeat(text.length);
-  return out;
+  const out = parts.join('');
+  return leakLevel(out, word) === 2 ? '*'.repeat(text.length) : out;
 }
 function handleChat(p, room, m) {
   if (spamCheck(room, p)) return;
   const text = clean(m.text, 120); if (!text) return;
   const now = Date.now(); p.chatTimes = p.chatTimes.filter(t => now - t < 4000); if (p.chatTimes.length >= 6) return; p.chatTimes.push(now);
   if (m.channel === 'public') {
+    if (room.phase === 'drawing' && leakLevel(text, room.word) === 2) return p.err('blocked');
     const safe = room.phase === 'drawing' ? maskLeaks(text, room.word) : text;
     const line = p.shownName + ': ' + safe; room.history.push(line); if (room.history.length > 60) room.history.shift();
     toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'public', text: line })); return;
@@ -479,8 +494,10 @@ function handleChat(p, room, m) {
     if (room.guessed.size >= room.players.size - 1) endRound(room, 'allGot');
     return;
   }
-  if (!p.guessed && isNear(text, room.word)) { p.send({ type: 'CHAT', channel: 'guess', text: p.shownName + ': ' + text, near: true }); return; }
-  const line = p.shownName + ': ' + (p.guessed ? maskLeaks(text, room.word) : text);
+  const lv = leakLevel(text, room.word);
+  if (!p.guessed && lv) { p.send({ type: 'CHAT', channel: 'guess', text: p.shownName + ': ' + text, near: true }); return; }
+  if (p.guessed && lv === 2) { p.send({ type: 'CHAT', channel: 'guess', text: tx(p.lang, 'blocked'), near: true }); return; }
+  const line = p.shownName + ': ' + (p.guessed && lv ? maskLeaks(text, room.word) : text);
   toRoom(room, pl => { if (!p.guessed || pl.guessed || pl.id === room.drawerId) pl.send({ type: 'CHAT', channel: 'guess', text: line }); });
 }
 
