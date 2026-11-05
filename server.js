@@ -42,6 +42,9 @@ async function setupDatabase() {
       bio: String,
       av: Number,
       img: String,
+      imgAt: Number,
+      imgDay: String,
+      imgCount: Number,
       updatedAt: { type: Number, default: Date.now }
     }));
 
@@ -64,7 +67,7 @@ async function setupDatabase() {
 
     // Carregar contas do MongoDB
     const savedAccs = await AccountModel.find({});
-    savedAccs.forEach(a => { accounts[a.gid] = { name: a.name, bio: a.bio, av: a.av, img: a.img }; });
+    savedAccs.forEach(a => { accounts[a.gid] = { name: a.name, bio: a.bio, av: a.av, img: a.img, imgAt: a.imgAt || (a.img ? Date.now() : 0), imgDay: a.imgDay, imgCount: a.imgCount, updatedAt: a.updatedAt }; });
 
     const savedBans = await BanModel.find({ until: { $gt: Date.now() } });
     savedBans.forEach(b => { bans.set(b.key, b.until); });
@@ -78,6 +81,8 @@ async function setupDatabase() {
     // Limpeza automática de contas inativas há mais de 10 dias
     const tenDaysAgo = Date.now() - (10 * 24 * 3600 * 1000);
     await AccountModel.deleteMany({ updatedAt: { $lt: tenDaysAgo } });
+    // fotos antigas sem data ganham 10 dias a partir de agora
+    await AccountModel.updateMany({ img: { $nin: [null, ''] }, imgAt: { $exists: false } }, { $set: { imgAt: Date.now() } });
 
   } catch (err) {
     console.error('  (Erro ao conectar no MongoDB Atlas):', err.message);
@@ -86,6 +91,7 @@ async function setupDatabase() {
 
 // ---------------------------------------------------------------- textos (3 idiomas)
 const MSG = {
+  imgLimit: { pt: 'Limite de 3 trocas de foto por dia. Tente amanhã!', en: 'Limit of 3 photo changes per day. Try again tomorrow!', es: '¡Límite de 3 cambios de foto por día. Inténtalo mañana!' },
   alreadyPlaying: { pt: 'Você já está jogando em outra aba ou dispositivo.', en: 'You are already playing in another tab or device.', es: 'Ya estás jugando en otra pestaña o dispositivo.' },
   roomFull: { pt: 'Sala cheia.', en: 'Room is full.', es: 'Sala llena.' },
   notFound: { pt: 'Sala não encontrada.', en: 'Room not found.', es: 'Sala no encontrada.' },
@@ -200,6 +206,25 @@ const conns = new Set(), byId = new Map();
 const rooms = new Map();
 const bans = new Map();
 const accounts = {};
+// ---- foto de perfil: validade de 10 dias + máx. 3 trocas/dia (só conta Google)
+const IMG_TTL = 10 * 24 * 3600 * 1000, IMG_DAILY = 3;
+const dayKey = () => new Date(Date.now() - 3 * 3600 * 1000).toISOString().slice(0, 10); // dia em Brasília
+const imgLeftOf = a => Math.max(0, IMG_DAILY - (a.imgDay === dayKey() ? (a.imgCount || 0) : 0));
+const accView = a => ({ ...a, imgLeft: imgLeftOf(a) });
+const imgInfo = a => ({ type: 'IMG_INFO', imgAt: a && a.img ? (a.imgAt || 0) : 0, imgLeft: a ? imgLeftOf(a) : IMG_DAILY });
+async function purgeExpiredImgs() {
+  const lim = Date.now() - IMG_TTL; let changed = false;
+  for (const gid in accounts) {
+    const a = accounts[gid];
+    if (!a.img || !a.imgAt || a.imgAt >= lim) continue;
+    a.img = null; a.av = 4; a.imgAt = 0; changed = true;
+    const pl = byId.get('g_' + gid);
+    if (pl) { setImg(pl, null); pl.av = 4; const r = pl.roomId && rooms.get(pl.roomId); if (r) broadcastRoom(r); pl.send({ type: 'ACCOUNT', profile: accView(a) }); }
+  }
+  if (changed) saveJSON('accounts.json', accounts);
+  if (dbConnected && AccountModel) { try { await AccountModel.updateMany({ img: { $nin: [null, ''] }, imgAt: { $gt: 0, $lt: lim } }, { $set: { img: null, av: 4, imgAt: 0 } }); } catch (e) {} }
+}
+setInterval(purgeExpiredImgs, 3600 * 1000);
 
 async function saveBans() {
   saveJSON('bans.json', Object.fromEntries(bans));
@@ -522,6 +547,7 @@ async function verifyGoogle(p, token, gid) {
 const snap = p => ({ name: p.name, bio: p.bio, av: p.av, img: p.img, updatedAt: Date.now() });
 
 async function saveAccountToDB(gid, data) {
+  data = { ...(accounts[gid] || {}), ...data }; // preserva imgAt/imgDay/imgCount
   accounts[gid] = data;
   saveJSON('accounts.json', accounts);
   if (dbConnected && AccountModel) {
@@ -538,13 +564,22 @@ async function googleLogin(p, token, gid) {
   if (acc) { 
     p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av; 
     if (safeImg(acc.img)) setImg(p, acc.img); else if (acc.av != null) setImg(p, null); 
-    p.send({ type: 'ACCOUNT', profile: acc }); 
+    p.send({ type: 'ACCOUNT', profile: accView(acc) }); 
     saveAccountToDB(p.gid, snap(p));
   } else { 
     await saveAccountToDB(p.gid, snap(p));
   }
   const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
   sendLobby(p);
+}
+function acceptImg(p, img) {
+  const acc = accounts[p.gid] || {};
+  if (acc.img === img) { setImg(p, img); return; }          // mesma foto (reconexão) não conta
+  const day = dayKey(), n = acc.imgDay === day ? (acc.imgCount || 0) : 0;
+  if (n >= IMG_DAILY) { p.err('imgLimit'); p.send(imgInfo(acc)); return; }
+  setImg(p, img);
+  accounts[p.gid] = { ...acc, img, imgAt: Date.now(), imgDay: day, imgCount: n + 1 };
+  p.send(imgInfo(accounts[p.gid]));
 }
 function setImg(p, img) { p.img = img || null; p.imgRev = img ? crypto.createHash('md5').update(img).digest('hex').slice(0, 10) : ''; }
 
@@ -565,7 +600,8 @@ function onMessage(p, m) {
     
     p.name = clean(m.name, 50); p.bio = clean(m.bio, 50); p.av = Number.isInteger(m.av) && m.av >= 0 && m.av < 5 ? m.av : 4;
     p.device = clean(m.device, 80); if (LANGS.includes(m.lang)) p.lang = m.lang;
-    if (safeImg(m.img)) setImg(p, m.img); else if (!m.hasImg) setImg(p, null);
+    if (p.verified && p.gid) { if (safeImg(m.img)) acceptImg(p, m.img); else if (!m.hasImg) setImg(p, null); }
+    else setImg(p, null); // anônimo: só avatares do jogo
 
     if (m.gtoken && !p.verified) {
       googleLogin(p, m.gtoken, m.gid).then(() => {
@@ -575,7 +611,7 @@ function onMessage(p, m) {
           if (acc) {
             p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av;
             if (safeImg(acc.img)) setImg(p, acc.img);
-            p.send({ type: 'ACCOUNT', profile: acc });
+            p.send({ type: 'ACCOUNT', profile: accView(acc) });
           }
         }
         const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
@@ -599,14 +635,22 @@ function onMessage(p, m) {
           if (acc) {
             p.name = clean(acc.name, 50); p.bio = clean(acc.bio, 50); p.av = Number.isInteger(acc.av) ? acc.av : p.av;
             if (safeImg(acc.img)) setImg(p, acc.img);
-            p.send({ type: 'ACCOUNT', profile: acc });
+            p.send({ type: 'ACCOUNT', profile: accView(acc) });
           }
         }
         const room = p.roomId && rooms.get(p.roomId); if (room) broadcastRoom(room);
         sendLobby(p);
       });
       break;
-    case 'GOOGLE_LOGOUT': p.verified = false; p.gid = null; p.verifying = null; break;
+    case 'GOOGLE_LOGOUT': p.verified = false; p.gid = null; p.verifying = null; setImg(p, null); break;
+    case 'RENEW_IMG': {
+      const a = p.verified && p.gid && accounts[p.gid];
+      if (a && a.img) {
+        a.imgAt = Date.now(); saveJSON('accounts.json', accounts);
+        if (dbConnected && AccountModel) AccountModel.updateOne({ gid: p.gid }, { $set: { imgAt: a.imgAt } }).catch(() => {});
+      }
+      p.send(imgInfo(a || null)); break;
+    }
     case 'JOIN': {
       if (LANGS.includes(m.lang)) p.lang = m.lang;
       const id = String(m.roomId || '');
@@ -747,4 +791,5 @@ server.listen(PORT, async () => {
   console.log('\n  ARTROK rodando! Abra no navegador: http://localhost:' + PORT + '\n');
   if (!htmlPath) console.log('  ATENÇÃO: coloque o artrok.html na mesma pasta do server.js\n');
   await setupDatabase();
+  purgeExpiredImgs();
 });
