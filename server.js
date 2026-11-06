@@ -503,16 +503,20 @@ function maskLeaks(text, word) {
   return leakLevel(out, word) === 2 ? '*'.repeat(text.length) : out;
 }
 function handleChat(p, room, m) {
-  if (spamCheck(room, p)) return;
   const text = clean(m.text, 120); if (!text) return;
-  const now = Date.now(); p.chatTimes = p.chatTimes.filter(t => now - t < 4000); if (p.chatTimes.length >= 6) return; p.chatTimes.push(now);
+  const now = Date.now();
   if (m.channel === 'public') {
+    // anti-spam (ban + limite) vale SÓ para o Bate-Papo; chutes são livres
+    if (spamCheck(room, p)) return;
+    p.chatTimes = p.chatTimes.filter(t => now - t < 4000); if (p.chatTimes.length >= 6) return; p.chatTimes.push(now);
     if (room.phase === 'drawing' && leakLevel(text, room.word) === 2) return p.err('blocked');
     const safe = room.phase === 'drawing' ? maskLeaks(text, room.word) : text;
     const line = p.shownName + ': ' + safe; room.history.push(line); if (room.history.length > 60) room.history.shift();
     toRoom(room, pl => pl.send({ type: 'CHAT', channel: 'public', text: line })); return;
   }
   if (room.phase !== 'drawing' || p.id === room.drawerId) return;
+  // chutes: sem ban e sem limite prático; apenas descarta rajadas absurdas (>40 em 2s) para não derrubar o servidor
+  p.guessTs = (p.guessTs || []).filter(t => now - t < 2000); if (p.guessTs.length >= 40) return; p.guessTs.push(now);
   if (!p.guessed && sameWord(text, room.word)) {
     const pts = Math.max(1, room.players.size - room.guessed.size);
     p.guessed = true; room.guessed.add(p.id); p.score += pts;
