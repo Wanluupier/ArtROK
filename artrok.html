@@ -93,6 +93,32 @@
         #canvas-container-box.is-fs #paint-canvas { border-radius: 0; box-shadow: none; }
         #game-screen > * { min-height: 0; }
 
+        /* ===== ANTI-ESTICAR: o layout NUNCA depende do tamanho do conteúdo dos chats ===== */
+        html, body { max-width: 100%; }
+        #chat-panel { contain: size; min-height: 0; }
+        #chat-panel > #chat-messages-guess,
+        #chat-panel > #chat-messages-public { flex: 1 1 0%; min-height: 0; height: 0; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; }
+        #chat-panel > #chat-messages-guess.hidden,
+        #chat-panel > #chat-messages-public.hidden { display: none; }
+        #players-list { overscroll-behavior: contain; }
+        @media (min-width: 1024px) {
+            #game-screen.is-active {
+                display: grid;
+                grid-template-columns: repeat(12, minmax(0, 1fr));
+                grid-template-rows: minmax(0, 1fr);
+                height: calc(100vh - 75px); height: calc(100dvh - 75px);
+                overflow: hidden;
+            }
+            #game-screen.is-active > * { height: 100%; max-height: 100%; overflow: hidden; }
+            #canvas-container-box { contain: size; }
+            #canvas-container-box.pseudo-fs, #canvas-container-box.is-fs { contain: none; overflow: visible; }
+            #chat-panel { height: 100%; max-height: 100%; }
+        }
+        @media (max-width: 1023px) {
+            #chat-panel { height: 13rem; max-height: 13rem; }
+            #canvas-container-box:not(.pseudo-fs):not(.is-fs) { height: 420px; max-height: 420px; }
+        }
+
         /* contador de partidas vencidas no canto do avatar */
         .win-badge { position:absolute; right:-4px; bottom:-4px; min-width:15px; height:15px; padding:0 3px; border-radius:999px; background:#FFC800; color:#000; border:1px solid #000; font:900 9px/13px ui-monospace,monospace; text-align:center; z-index:2; }
         .win-badge.win-inf { min-width:20px; height:18px; right:-6px; bottom:-6px; font-size:15px; line-height:15px; background:linear-gradient(135deg,#FFC800,#ff7a00,#FFC800); background-size:200% 200%; animation:infShine 2s linear infinite; box-shadow:0 0 8px #FFC800; }
@@ -333,7 +359,7 @@
         </div>
 
         <!-- PAINEL DIREITO: CHATS (CHUTES X BATE-PAPO) -->
-        <div class="lg:col-span-3 bg-brand-card rounded-xl border border-brand-border flex flex-col justify-between overflow-hidden shadow-lg h-52 lg:h-full">
+        <div id="chat-panel" class="lg:col-span-3 bg-brand-card rounded-xl border border-brand-border flex flex-col justify-between overflow-hidden shadow-lg h-52 lg:h-full">
             <div class="flex border-b border-brand-border bg-zinc-900/60">
                 <button id="tab-guess" onclick="switchChatTab('guess')" class="flex-1 py-2 text-xs font-bold text-brand-yellow border-b-2 border-brand-yellow flex items-center justify-center space-x-1 transition-all">
                     <i data-lucide="help-circle" class="w-3.5 h-3.5"></i>
