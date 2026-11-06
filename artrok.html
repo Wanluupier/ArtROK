@@ -346,8 +346,8 @@
                 </button>
             </div>
 
-            <div id="chat-messages-guess" class="flex-1 p-2.5 overflow-y-auto space-y-1.5 text-xs"></div>
-            <div id="chat-messages-public" class="hidden flex-1 p-2.5 overflow-y-auto space-y-1.5 text-xs"></div>
+            <div id="chat-messages-guess" class="flex-1 min-h-0 p-2.5 overflow-y-auto space-y-1.5 text-xs"></div>
+            <div id="chat-messages-public" class="hidden flex-1 min-h-0 p-2.5 overflow-y-auto space-y-1.5 text-xs"></div>
 
             <div class="p-2 border-t border-brand-border bg-zinc-900/40">
                 <form id="chat-form" onsubmit="handleChatSubmit(event)" class="space-y-1">
@@ -1254,6 +1254,7 @@
         }
 
         const PUBLIC_NOTICE_RE = /denunci|reportou|reported|reportó|bani|ban\b|banned|vot(o|ou|aram|ed|ó)\b|votes?\b|votos\b/i;
+        const CHAT_MAX_MESSAGES = 50;
         function addChatMessage(type, msg, scope, silent, near) {
             const toPublic = type === 'public' || scope === 'public' || (type === 'system' && PUBLIC_NOTICE_RE.test(String(msg)));
             if (toPublic && !silent && activeChatTab !== 'public') { chatUnread++; renderChatBadge(); }
@@ -1273,6 +1274,7 @@
 
             el.textContent = type === 'system' ? trServer(msg) : msg;
             container.appendChild(el);
+            while (container.children.length > CHAT_MAX_MESSAGES) container.removeChild(container.firstChild);
             container.scrollTop = container.scrollHeight;
         }
 
