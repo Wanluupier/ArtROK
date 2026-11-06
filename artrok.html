@@ -1714,9 +1714,8 @@
             backToLobbyUI();
             const el = document.createElement('div');
             el.className = 'fixed inset-0 z-[60] bg-black/95 flex flex-col items-center justify-center p-6 text-center space-y-3';
-            el.innerHTML = '<div class="text-5xl">🚫</div><h2 class="text-2xl font-black text-brand-yellow">' + tr('Você foi banido desta sala') + '</h2><p class="text-zinc-300 text-sm" id="ban-reason"></p><p class="text-zinc-400 text-xs">' + tr('O banimento termina automaticamente em ') + '<b id="ban-left" class="text-white font-mono"></b></p><button class="px-6 py-3 bg-brand-yellow text-black font-extrabold rounded-xl text-xs uppercase">' + tr('Entendi') + '</button>';
+            el.innerHTML = '<div class="text-5xl">🚫</div><h2 class="text-2xl font-black text-brand-yellow">' + tr('Você foi banido desta sala') + '</h2><p class="text-zinc-400 text-xs">' + tr('O banimento termina automaticamente em ') + '<b id="ban-left" class="text-white font-mono"></b></p><button class="px-6 py-3 bg-brand-yellow text-black font-extrabold rounded-xl text-xs uppercase">' + tr('Entendi') + '</button>';
             const theme = roomThemes.find(t => t.id === m.room);
-            el.querySelector('#ban-reason').textContent = `${trServer(m.reason)} ${tr('Sala:')} ${theme ? theme.name[currentLang] : m.room}`;
             const left = el.querySelector('#ban-left');
             const tick = () => { const s = Math.max(0, Math.ceil((m.until - Date.now()) / 1000)); left.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
             tick(); const iv = setInterval(tick, 1000);
