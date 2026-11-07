@@ -300,8 +300,8 @@ function spamCheck(room, p) {
   if (p.spamTs.length > 10) { p.spamTs = []; autoBan(room, p, 'spam'); return true; } return false;
 }
 function strokeCheck(room, p) {
-  const now = Date.now(); p.strokeTs = (p.strokeTs || []).filter(t => now - t < 10000); p.strokeTs.push(now);
-  if (p.strokeTs.length >= 50) { p.strokeTs = []; autoBan(room, p, 'auto'); return true; } return false;
+  const now = Date.now(); p.strokeTs = (p.strokeTs || []).filter(t => now - t < 15000); p.strokeTs.push(now);
+  if (p.strokeTs.length > 50) { p.strokeTs = []; autoBan(room, p, 'auto'); return true; } return false;
 }
 const needVotes = room => Math.floor(room.players.size / 2) + 1;
 function notifyWatchers(room, id) {
