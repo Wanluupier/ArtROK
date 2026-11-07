@@ -1010,6 +1010,17 @@
                     return;
                 }
                 isDrawing = true;
+
+                // clique/toque sem arrastar desenha um ponto (e vai para os outros jogadores)
+                drawLineLocal(lastX, lastY, lastX, lastY, currentColor, currentLineWidth, currentTool === 'eraser');
+                broadcastOnlineData({
+                    type: 'CANVAS_DRAW',
+                    roomId: activeRoom.id,
+                    x0: lastX, y0: lastY, x1: lastX, y1: lastY,
+                    color: currentColor,
+                    lineWidth: currentLineWidth,
+                    isEraser: currentTool === 'eraser'
+                });
             };
 
             const moveDraw = (e) => {
