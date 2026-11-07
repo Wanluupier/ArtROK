@@ -2218,7 +2218,8 @@
             const ar = canvas.width / canvas.height;
             const fs = document.getElementById('canvas-container-box').classList.contains('is-fs');
             let cw = w, ch = w / ar;
-            if (fs) {
+            const touchDev = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+            if (fs && touchDev) {
                 // tela cheia: o desenho cobre TODA a área branca (zoom); o que sobra fica cortado
                 // e continua acessível ao sair da tela cheia
                 if (ch < h) { ch = h; cw = h * ar; }
