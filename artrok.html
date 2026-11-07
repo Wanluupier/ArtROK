@@ -91,6 +91,11 @@
         #canvas-container-box:not(.is-fs) #game-board { background: transparent !important; border-color: transparent !important; box-shadow: none !important; overflow: visible; }
         #canvas-container-box:not(.is-fs) #paint-canvas { border-radius: 12px; box-shadow: 0 0 0 2px #262626, 0 10px 25px rgba(0,0,0,.5); }
         #canvas-container-box.is-fs #paint-canvas { border-radius: 0; box-shadow: none; }
+        /* PC: em tela cheia o desenho aparece inteiro e a borda mostra exatamente onde o pincel alcança */
+        @media not all and (pointer: coarse) {
+            #canvas-container-box.is-fs #game-board { background: transparent !important; border-color: transparent !important; box-shadow: none !important; }
+            #canvas-container-box.is-fs #paint-canvas { border-radius: 12px; box-shadow: 0 0 0 2px #262626, 0 10px 25px rgba(0,0,0,.5); }
+        }
         #game-screen > * { min-height: 0; }
 
         /* ===== ANTI-ESTICAR: o layout NUNCA depende do tamanho do conteúdo dos chats ===== */
