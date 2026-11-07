@@ -1001,6 +1001,7 @@
 
             const startDraw = (e) => {
                 if (!activeRoom || activeRoom.players.length < 2 || activeRoom.drawerId !== currentUser.id || activeRoom.phase === 'between') return;
+                if (e.type === 'touchstart' && e.cancelable) e.preventDefault(); // evita o mousedown falso do celular (ponto/traço duplicado)
                 const pos = getPos(e);
                 lastX = pos.x; lastY = pos.y;
 
@@ -1062,6 +1063,14 @@
 
         function drawLineLocal(x0, y0, x1, y1, color, width, isEraser) {
             if (!ctx) return;
+            if (x0 === x1 && y0 === y1) {
+                // ponto: círculo preenchido (linha de comprimento zero não aparece em alguns navegadores)
+                ctx.beginPath();
+                ctx.arc(x0, y0, (isEraser ? width * 3 : width) / 2, 0, Math.PI * 2);
+                ctx.fillStyle = isEraser ? '#FFFFFF' : color;
+                ctx.fill();
+                return;
+            }
             ctx.beginPath();
             ctx.moveTo(x0, y0);
             ctx.lineTo(x1, y1);
