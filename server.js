@@ -428,10 +428,6 @@ function nextRound(room) {
   room.interval = setInterval(() => {
     room.timeLeft--;
     toRoom(room, pl => pl.send({ type: 'TICK', t: room.timeLeft }));
-    const letters = [...room.word].map((c, i) => i).filter(i => room.word[i] !== ' ');
-    if (letters.length >= 5 && (room.timeLeft === Math.floor(ROUND_SECONDS / 2) || room.timeLeft === Math.floor(ROUND_SECONDS / 4))) {
-      const hidden = letters.filter(i => !room.revealed.has(i)); if (hidden.length > 2) { room.revealed.add(hidden[rnd(hidden.length)]); room.hint = mask(room); broadcastRoom(room); }
-    }
     if (room.timeLeft <= 0) endRound(room, 'timeUp');
   }, 1000);
 }
